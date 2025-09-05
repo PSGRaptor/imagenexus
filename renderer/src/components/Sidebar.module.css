@@ -1,0 +1,15 @@
+.root {
+    @apply h-full p-3 bg-gray-950;
+}
+.sectionTitle {
+    @apply text-sm text-gray-400 uppercase tracking-wider mb-2;
+}
+.item {
+    @apply flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-800 cursor-pointer;
+}
+.badge {
+    @apply text-xs bg-gray-800 px-2 py-0.5 rounded;
+}
+.input {
+    @apply w-full px-2 py-1 rounded bg-gray-800 border border-gray-700 outline-none;
+}

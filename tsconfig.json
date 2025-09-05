@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2021",
+    "module": "CommonJS",
+    "lib": ["ES2021", "DOM"],
+    "allowJs": false,
+    "checkJs": false,
+    "declaration": false,
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "sourceMap": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "moduleResolution": "Node",
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@main/*": ["main/*"],
+      "@renderer/*": ["renderer/src/*"]
+    },
+    "outDir": "dist"
+  },
+  "include": ["main/**/*", "renderer/**/*", "scripts/**/*", "config/**/*"],
+  "exclude": ["node_modules", "dist", "release"]
+}

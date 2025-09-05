@@ -1,0 +1,9 @@
+/node_modules
+/dist
+/release
+/.DS_Store
+Thumbs.db
+/.idea
+/.vscode
+/config/user-settings.json
+/config/favorites.json

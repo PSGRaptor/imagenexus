@@ -1,0 +1,12 @@
+.card {
+    @apply relative rounded-xl2 border border-gray-800 overflow-hidden bg-gray-900 hover:border-brand-600 cursor-pointer;
+}
+.badges {
+    @apply absolute top-1 left-1 flex gap-1;
+}
+.badge {
+    @apply text-[10px] px-1.5 py-0.5 rounded bg-gray-800/90;
+}
+.star {
+    @apply absolute top-1 right-1 px-1 py-0.5 rounded bg-gray-800 hover:bg-gray-700;
+}

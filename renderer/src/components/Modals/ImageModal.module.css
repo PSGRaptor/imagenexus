@@ -1,0 +1,7 @@
+.backdrop { @apply fixed inset-0 bg-black/70 flex items-center justify-center; }
+.panel { @apply w-[90vw] h-[85vh] rounded-xl2 bg-gray-950 border border-gray-800 overflow-hidden grid grid-cols-2; }
+.left { @apply bg-gray-900 flex items-center justify-center; }
+.right { @apply p-3 overflow-auto; }
+.section { @apply mb-3; }
+.sectionTitle { @apply text-sm text-gray-400 uppercase mb-1; }
+.btn { @apply px-2 py-1 rounded bg-gray-800 border border-gray-700 hover:bg-gray-700; }

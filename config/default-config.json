@@ -1,0 +1,9 @@
+{
+  "roots": [],
+  "activeRoot": "",
+  "watch": true,
+  "theme": "dark",
+  "showNSFW": false,
+  "ignorePatterns": ["**/*.tmp", "**/cache/**"],
+  "thumbnail": { "width": 480, "quality": 80 }
+}

@@ -1,0 +1,27 @@
+{
+  "appId": "com.psgraptor.imagenexus",
+  "productName": "Image Nexus",
+  "files": [
+    "dist/**",
+    "renderer/**",
+    "config/**",
+    "resources/**",
+    "package.json"
+  ],
+  "directories": {
+    "output": "release",
+    "buildResources": "resources"
+  },
+  "asar": true,
+  "win": {
+    "target": ["nsis"],
+    "icon": "resources/icon.ico",
+    "artifactName": "ImageNexus-${version}-win-${arch}.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true
+  }
+}

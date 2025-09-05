@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import styles from './renderer/src/components/Modal/ImageModal.module.css';
+import styles from './ImageModal.module.css';
 import type { ImageItem, ImageMetadata } from '../../types';
 
 const Collapsible: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => {
@@ -22,18 +22,41 @@ const ImageModal: React.FC<{
     onNext?: () => void;
     onPrev?: () => void;
 }> = ({ open = false, item = null, onClose = () => {}, onNext = () => {}, onPrev = () => {} }) => {
-    const [thumb, setThumb] = useState('');
+    const [thumbUrl, setThumbUrl] = useState<string | null>(null);
     const [meta, setMeta] = useState<ImageMetadata | null>(null);
 
     useEffect(() => {
-        if (!item) return;
+        if (!open || !item) return;
+        let mounted = true;
         (async () => {
-            const t = await window.api.getThumbnail(item.path);
-            setThumb(`file://${t}`);
-            const m = await window.api.getMetadata(item.path);
-            setMeta(m);
+            try {
+                const t = await window.api.getThumbnail(item.path); // file://
+                const m = await window.api.getMetadata(item.path);
+                if (!mounted) return;
+                setThumbUrl(t);
+                setMeta(m);
+            } catch {
+                if (!mounted) return;
+                setThumbUrl(null);
+                setMeta(null);
+            }
         })();
-    }, [item?.path]);
+        return () => { mounted = false; };
+    }, [open, item?.path]);
+
+    const copyAll = useMemo(() => {
+        if (!meta) return '';
+        return [
+            meta.prompt ? `Prompt: ${meta.prompt}` : '',
+            meta.negative ? `Negative: ${meta.negative}` : '',
+            meta.model ? `Model: ${meta.model}` : '',
+            meta.sampler ? `Sampler: ${meta.sampler}` : '',
+            meta.steps !== undefined ? `Steps: ${meta.steps}` : '',
+            meta.cfgScale !== undefined ? `CFG: ${meta.cfgScale}` : '',
+            meta.seed !== undefined ? `Seed: ${meta.seed}` : '',
+            meta.size ? `Size: ${meta.size}` : '',
+        ].filter(Boolean).join('\n');
+    }, [meta]);
 
     if (!open || !item) return null;
 
@@ -41,7 +64,11 @@ const ImageModal: React.FC<{
         <div className={styles.backdrop} onClick={onClose}>
             <div className={styles.panel} onClick={e => e.stopPropagation()}>
                 <div className={styles.left}>
-                    <img src={thumb} alt={item.name} className="max-h-full max-w-full object-contain" draggable={false} />
+                    {thumbUrl ? (
+                        <img src={thumbUrl} alt={item.name} className="max-h-full max-w-full object-contain" />
+                    ) : (
+                        <div className="text-xs text-gray-500">preview</div>
+                    )}
                 </div>
                 <div className={styles.right}>
                     <div className="flex items-center gap-2 mb-3">
@@ -57,24 +84,15 @@ const ImageModal: React.FC<{
                     </div>
 
                     <Collapsible title="Prompt">
-                        <div className="whitespace-pre-wrap">{meta?.prompt || '—'}</div>
+                        {meta?.prompt || <span className="text-gray-500">—</span>}
                         <div className="mt-2">
-                            <button className={styles.btn} onClick={() => meta?.prompt && window.api.writeText(meta.prompt!)}>Copy Prompt</button>
-                            <button className={styles.btn} onClick={() => window.api.writeText([
-                                `Prompt: ${meta?.prompt || ''}`,
-                                `Negative: ${meta?.negative || ''}`,
-                                `Model: ${meta?.model || ''}`,
-                                `Sampler: ${meta?.sampler || ''}`,
-                                `Steps: ${meta?.steps ?? ''}`,
-                                `CFG: ${meta?.cfgScale ?? ''}`,
-                                `Seed: ${meta?.seed ?? ''}`,
-                                `Size: ${meta?.size || ''}`
-                            ].join('\n'))}>Copy All</button>
+                            <button className={styles.btn} disabled={!meta?.prompt} onClick={() => meta?.prompt && window.api.writeText(meta.prompt!)}>Copy Prompt</button>
+                            <button className={styles.btn} disabled={!copyAll} onClick={() => copyAll && window.api.writeText(copyAll)}>Copy All</button>
                         </div>
                     </Collapsible>
 
                     <Collapsible title="Negative">
-                        <div className="whitespace-pre-wrap">{meta?.negative || '—'}</div>
+                        {meta?.negative || <span className="text-gray-500">—</span>}
                     </Collapsible>
 
                     <Collapsible title="Generation Settings">
@@ -91,7 +109,11 @@ const ImageModal: React.FC<{
                     </Collapsible>
 
                     <Collapsible title="Raw JSON">
-                        <pre className="text-xs overflow-auto bg-gray-900 p-2 rounded">{JSON.stringify(meta?.raw ?? meta?.other ?? {}, null, 2)}</pre>
+            <pre className="text-xs overflow-auto bg-gray-900 p-2 rounded">
+              {typeof meta?.raw === 'string'
+                  ? meta.raw
+                  : JSON.stringify(meta?.raw ?? meta?.other ?? {}, null, 2)}
+            </pre>
                     </Collapsible>
                 </div>
             </div>

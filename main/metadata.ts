@@ -1,7 +1,7 @@
 import fs from 'fs-extra';
 import path from 'path';
-import extractChunks from 'png-chunks-extract';
-import decodeText from 'png-chunk-text';
+import extractChunks, { PngChunk } from 'png-chunks-extract';
+import decodeText, { PngTextChunk } from 'png-chunk-text';
 import { ImageMetadata } from './types';
 
 // Dynamic import for ESM modules at runtime
@@ -69,17 +69,17 @@ export async function readMetadata(filePath: string): Promise<ImageMetadata> {
     if (ext === '.png') {
         try {
             const buf = await fs.readFile(filePath);
-            const chunks = extractChunks(buf);
-            const texts = chunks
-                .filter(c => c.name === 'tEXt' || c.name === 'iTXt')
-                .map(c => {
+            const chunks: PngChunk[] = extractChunks(buf);
+            const texts: PngTextChunk[] = chunks
+                .filter((c: PngChunk) => c.name === 'tEXt' || c.name === 'iTXt')
+                .map((c: PngChunk) => {
                     try {
-                        return decodeText(c) as { keyword: string; text: string };
+                        return decodeText(c);
                     } catch {
-                        return null;
+                        return null as unknown as PngTextChunk;
                     }
                 })
-                .filter(Boolean) as { keyword: string; text: string }[];
+                .filter((x: PngTextChunk | null): x is PngTextChunk => Boolean(x));
 
             const kv: Record<string, string> = {};
             for (const t of texts) kv[t.keyword] = t.text;
@@ -108,15 +108,17 @@ export async function readMetadata(filePath: string): Promise<ImageMetadata> {
                 // Unknown PNG metadata; return raw
                 return { source: 'embedded', generator: detectGenerator(keys, kv), other: kv, raw: kv };
             }
-        } catch { /* fallthrough */ }
+        } catch {
+            /* fallthrough */
+        }
     } else if (ext === '.jpg' || ext === '.jpeg' || ext === '.webp') {
         try {
             const exif = await exifrParse(filePath);
             if (exif) {
-                const textFields = ['UserComment', 'ImageDescription', 'XPComment', 'Description'];
+                const textFields = ['UserComment', 'ImageDescription', 'XPComment', 'Description'] as const;
                 let found: string | undefined = undefined;
                 for (const f of textFields) {
-                    if (exif[f]) { found = String(exif[f]); break; }
+                    if ((exif as any)[f]) { found = String((exif as any)[f]); break; }
                 }
                 if (found) {
                     const partial = parseA1111ParamsBlock(found);
@@ -124,7 +126,9 @@ export async function readMetadata(filePath: string): Promise<ImageMetadata> {
                 }
                 return { source: 'embedded', generator: 'unknown', other: exif, raw: exif };
             }
-        } catch { /* fallthrough */ }
+        } catch {
+            /* fallthrough */
+        }
     }
 
     // Sidecar discovery

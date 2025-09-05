@@ -1,5 +1,5 @@
 import React from 'react';
-import styles from './Modals/ImageModal.module.css';
+import styles from './ImageModal.module.css';
 
 const AboutModal: React.FC<{ open: boolean; onClose: () => void; }> = ({ open, onClose }) => {
     if (!open) return null;

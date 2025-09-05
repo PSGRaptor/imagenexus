@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme } from 'electro
 import path from 'path';
 import fs from 'fs-extra';
 import debounce from 'lodash.debounce';
-import chokidar from 'chokidar';
+import chokidar, { FSWatcher } from 'chokidar';
 import { readSettings, writeSettings, getFavorites, setFavorite, getThumbDir } from './userSettings';
 import { scanImages } from './fileScanner';
 import { ensureThumbnail } from './thumbnailer';
@@ -12,7 +12,7 @@ import type { ImageItem, UserSettings, ScanResult } from './types';
 let win: BrowserWindow | null = null;
 let settings: UserSettings;
 let images: ImageItem[] = [];
-let watcher: chokidar.FSWatcher | null = null;
+let watcher: FSWatcher | null = null;
 
 // Use Electron's built-in flag; no electron-is-dev needed
 function isDev() {
@@ -29,7 +29,8 @@ async function createWindow() {
             preload: path.join(__dirname, '../preload/preload.js'),
             contextIsolation: true,
             nodeIntegration: false,
-            sandbox: true
+            sandbox: true,
+            webSecurity: app.isPackaged,
         },
         show: false
     });
@@ -47,6 +48,10 @@ async function createWindow() {
 }
 
 app.whenReady().then(async () => {
+    if (!app.isPackaged) {
+        process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
+    }
+
     await createWindow();
 
     // Initial scan
@@ -133,8 +138,8 @@ ipcMain.handle('image:metadata', async (_e, filePath: string) => {
 
 ipcMain.handle('image:thumbnail', async (_e, filePath: string) => {
     const thDir = getThumbDir();
-    const out = await ensureThumbnail(thDir, filePath, settings.thumbnail.width, settings.thumbnail.quality);
-    return out;
+    const outUrl = await ensureThumbnail(thDir, filePath, settings.thumbnail.width, settings.thumbnail.quality);
+    return outUrl; // file:// URL
 });
 
 ipcMain.handle('image:open', async (_e, filePath: string) => {

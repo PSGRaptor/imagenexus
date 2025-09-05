@@ -9,7 +9,7 @@ export default defineConfig([
         dts: false,
         sourcemap: true,
         clean: true,
-        external: ['electron', 'sharp'] // sharp loads dynamically
+        external: ['electron', 'sharp', 'exifr'] // sharp loads dynamically
     },
     {
         entry: { preload: 'main/preload.ts' },

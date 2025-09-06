@@ -1,28 +1,44 @@
-import type { ImageItem, ImageMetadata, ScanResult, UserSettings } from './types';
+// FILE: renderer/src/global.d.ts
+import type { Settings } from '@/context/SettingsContext';
 
 declare global {
     interface Window {
         api: {
-            getSettings(): Promise<UserSettings>;
-            setSettings(s: UserSettings): Promise<void>;
-            pickFolder(): Promise<string | null>;
-            scan(): Promise<ScanResult>;
-            startWatch(): Promise<void>;
-            stopWatch(): Promise<void>;
-            onImagesChanged(cb: () => void): void;
+            // Settings
+            getSettings: () => Promise<Settings>;
+            saveSettings: (s: Settings) => Promise<void>;
+            setSettings: (s: Settings) => Promise<void>; // legacy alias
+            pickFolder: () => Promise<string | null>;
+            pickFolderLegacy: () => Promise<string | null>;
 
-            getMetadata(filePath: string): Promise<ImageMetadata>;
-            getThumbnail(filePath: string): Promise<string>;
-            openInExplorer(filePath: string): Promise<void>;
-            copyPath(filePath: string): Promise<void>;
-            exportMetadata(filePath: string): Promise<string>;
-            setFavorite(filePath: string, fav: boolean): Promise<void>;
-            batchMove(files: string[], dest: string): Promise<void>;
-            batchDelete(files: string[]): Promise<void>;
+            // Scan & Watch
+            scanImages: (rootPath: string) => Promise<any[]>;
+            startWatch: (rootPath: string) => Promise<void>;
+            stopWatch: () => Promise<void>;
+            onWatchEvent: (
+                cb: (payload: { evt: 'add' | 'unlink' | 'change'; file: string }) => void
+            ) => () => void;
 
-            writeText(text: string): void;
-            shellOpenExternal(url: string): void;
+            // Metadata & Thumbnails
+            getMetadata: (filePath: string) => Promise<any>;
+            getThumbnail: (filePath: string, maxSize: number) => Promise<string | undefined>;
+
+            // Favorites
+            toggleFavorite: (filePath: string) => Promise<boolean>;
+            isFavorite: (filePath: string) => Promise<boolean>;
+            listFavorites: () => Promise<string[]>;
+
+            // File ops
+            openInExplorer: (filePath: string) => Promise<boolean>;
+            copyPath: (filePath: string) => Promise<boolean>;
+            exportMetadata: (filePath: string, text: string) => Promise<string>;
+            deleteFiles: (paths: string[]) => Promise<boolean>;
+            moveFiles: (paths: string[], targetDir: string) => Promise<boolean>;
+
+            // Utils
+            shellOpenExternal: (url: string) => void;
         };
     }
 }
+
 export {};

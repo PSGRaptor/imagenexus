@@ -1,68 +1,90 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme } from 'electron';
-import path from 'path';
-import fs from 'fs-extra';
-import debounce from 'lodash.debounce';
-import chokidar, { FSWatcher } from 'chokidar';
-import { readSettings, writeSettings, getFavorites, setFavorite, getThumbDir } from './userSettings';
-import { scanImages } from './fileScanner';
-import { ensureThumbnail } from './thumbnailer';
-import { readMetadata } from './metadata';
-import type { ImageItem, UserSettings, ScanResult } from './types';
+import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron';
+import path from 'node:path';
+import fs from 'node:fs';
+import fse from 'fs-extra';
+import { debounce } from 'lodash';
+import { createImageWatcher, stopImageWatcher } from './watcher';
+import { scanImages } from './scanner';
+import { getMetadataForFile } from './metadata';
+import { ensureSettings, getSettings, saveSettings } from './settings';
+import { makeThumbnail } from './thumbnails';
+import { getFavorites, isFavorite, toggleFavorite } from './favorites';
 
-let win: BrowserWindow | null = null;
-let settings: UserSettings;
-let images: ImageItem[] = [];
-let watcher: FSWatcher | null = null;
+let mainWindow: BrowserWindow | null = null;
 
-// Use Electron's built-in flag; no electron-is-dev needed
-function isDev() {
-    return !app.isPackaged;
+const isDev = !app.isPackaged;
+
+async function loadRenderer(win: BrowserWindow) {
+    const devUrl =
+        process.env.ELECTRON_RENDERER_URL ||
+        process.env.VITE_DEV_SERVER_URL ||
+        'http://localhost:5173/';
+    if (isDev) {
+        await win.loadURL(devUrl);
+    } else {
+        const indexPath = path.join(__dirname, '../../.vite/build/renderer/index.html');
+        await win.loadFile(indexPath);
+    }
 }
 
 async function createWindow() {
-    settings = await readSettings();
-    win = new BrowserWindow({
-        width: 1300,
-        height: 900,
+    await ensureSettings();
+
+    mainWindow = new BrowserWindow({
+        width: 1280,
+        height: 800,
         backgroundColor: '#111827',
+        show: true, // show immediately
         webPreferences: {
-            preload: path.join(__dirname, '../preload/preload.js'),
-            contextIsolation: true,
+            preload: path.resolve(__dirname, '../preload/preload.cjs'),
             nodeIntegration: false,
-            sandbox: true,
-            webSecurity: app.isPackaged,
+            contextIsolation: true,
+            sandbox: false,
+            devTools: true, // allow manual open
         },
-        show: false
     });
 
-    nativeTheme.themeSource = settings.theme === 'dark' ? 'dark' : 'light';
+    // safety: if ready-to-show fires, ensure visible
+    mainWindow.once('ready-to-show', () => {
+        if (!mainWindow?.isVisible()) mainWindow?.show();
+        mainWindow?.focus();
+    });
 
-    const url = isDev()
-        ? 'http://localhost:5173'
-        : `file://${path.join(process.cwd(), 'dist', 'renderer', 'index.html')}`;
+    // fallback: force-show after 1s
+    setTimeout(() => {
+        if (mainWindow && !mainWindow.isVisible()) {
+            mainWindow.show();
+            mainWindow.focus();
+        }
+    }, 1000);
 
-    await win.loadURL(url);
-    win.once('ready-to-show', () => win?.show());
+    try {
+        await loadRenderer(mainWindow);
+    } catch (err) {
+        const msg = (err as Error)?.message || String(err);
+        const html = `<html><body style="font-family:system-ui;background:#111;color:#eee;padding:20px">
+      <h2>Failed to load renderer</h2>
+      <pre>${msg.replace(/[<>&]/g, s => ({'<':'&lt;','>':'&gt;','&':'&amp;'} as any)[s])}</pre>
+      <p>Dev server should be at: <code>${process.env.ELECTRON_RENDERER_URL || process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173/'}</code></p>
+    </body></html>`;
+        await mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    }
 
-    if (isDev()) win.webContents.openDevTools({ mode: 'detach' });
+    // ⛔ Don’t auto-open DevTools unless explicitly requested
+    if (isDev && process.env.DEBUG_DEVTOOLS === '1') {
+        mainWindow.webContents.openDevTools({ mode: 'detach' });
+    }
+
+    mainWindow.on('closed', () => {
+        mainWindow = null;
+        stopImageWatcher();
+    });
 }
 
 app.whenReady().then(async () => {
-    if (!app.isPackaged) {
-        process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
-    }
-
     await createWindow();
-
-    // Initial scan
-    images = await scanImages(await readSettings());
-    injectFavorites(images, await getFavorites());
-    win?.webContents.send('images:changed');
-
-    if (settings.watch) startWatcher();
-
-    app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    app.on('activate', async () => {
+        if (BrowserWindow.getAllWindows().length === 0) await createWindow();
     });
 });
 
@@ -70,140 +92,87 @@ app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
 });
 
-function injectFavorites(list: ImageItem[], favs: Record<string, boolean>) {
-    for (const im of list) im.favorite = !!favs[im.path];
-}
-
-async function startWatcher() {
-    if (!settings.activeRoot) return;
-    if (watcher) await watcher.close();
-
-    watcher = chokidar.watch(settings.activeRoot, {
-        ignored: settings.ignorePatterns,
-        ignoreInitial: true,
-        awaitWriteFinish: { stabilityThreshold: 400, pollInterval: 100 }
-    });
-
-    const refresh = debounce(async () => {
-        images = await scanImages(settings);
-        injectFavorites(images, await getFavorites());
-        win?.webContents.send('images:changed');
-    }, 500);
-
-    watcher.on('add', refresh).on('unlink', refresh).on('change', refresh);
-}
-
-async function stopWatcher() {
-    if (watcher) {
-        await watcher.close();
-        watcher = null;
-    }
-}
-
-/** IPC Handlers */
-
-ipcMain.handle('settings:get', async () => {
-    settings = await readSettings();
-    return settings;
+/* -------------------------
+   Settings (new + aliases)
+-------------------------- */
+ipcMain.handle('settings:get', async () => getSettings());
+ipcMain.handle('settings:save', async (_e, s) => saveSettings(s));
+ipcMain.handle('dialog:pickFolder', async () => {
+    const res = await dialog.showOpenDialog({ properties: ['openDirectory'] });
+    return res.canceled || !res.filePaths.length ? '' : res.filePaths[0];
+});
+ipcMain.handle('settings:set', async (_e, s) => saveSettings(s)); // alias
+ipcMain.handle('settings:pick-folder', async () => {              // alias
+    const res = await dialog.showOpenDialog({ properties: ['openDirectory'] });
+    return res.canceled || !res.filePaths.length ? '' : res.filePaths[0];
 });
 
-ipcMain.handle('settings:set', async (_e, s: UserSettings) => {
-    settings = s;
-    await writeSettings(s);
-    if (s.watch) await startWatcher();
-    else await stopWatcher();
-    return;
+/* -------------------------
+   Scan & Watch (new + alias)
+-------------------------- */
+ipcMain.handle('images:scan', async (_e, rootPath: string) => scanImages(rootPath));
+ipcMain.handle('images:watch:start', async (_e, rootPath: string) => {
+    const sendEvent = debounce((payload: any) => {
+        mainWindow?.webContents.send('images:watch:event', payload);
+    }, 50);
+    return createImageWatcher(
+        rootPath,
+        (evt: 'add' | 'unlink' | 'change', file: string) => sendEvent({ evt, file })
+    );
+});
+ipcMain.handle('images:watch:stop', async () => stopImageWatcher());
+ipcMain.handle('scanner:scan', async (_e, rootPath: string) => scanImages(rootPath)); // alias
+
+/* -------------------------
+   Metadata & Thumbnails
+-------------------------- */
+ipcMain.handle('image:metadata', async (_e, filePath: string) => getMetadataForFile(filePath));
+ipcMain.handle('image:thumbnail', async (_e, filePath: string, maxSize: number) => {
+    const thumbPath = await makeThumbnail(filePath, maxSize);
+    return thumbPath;
 });
 
-ipcMain.handle('settings:pick-folder', async () => {
-    if (!win) return null;
-    const res = await dialog.showOpenDialog(win, { properties: ['openDirectory'] });
-    if (res.canceled || res.filePaths.length === 0) return null;
-    return res.filePaths[0];
-});
+/* -------------------------
+   Favorites
+-------------------------- */
+ipcMain.handle('favorites:toggle', async (_e, filePath: string) => toggleFavorite(filePath));
+ipcMain.handle('favorites:is', async (_e, filePath: string) => isFavorite(filePath));
+ipcMain.handle('favorites:list', async () => getFavorites());
 
-ipcMain.handle('scanner:scan', async (): Promise<ScanResult> => {
-    settings = await readSettings();
-    images = await scanImages(settings);
-    injectFavorites(images, await getFavorites());
-    return { images, total: images.length };
-});
-
-ipcMain.handle('watcher:start', async () => startWatcher());
-ipcMain.handle('watcher:stop', async () => stopWatcher());
-
-ipcMain.handle('image:metadata', async (_e, filePath: string) => {
-    return readMetadata(filePath);
-});
-
-ipcMain.handle('image:thumbnail', async (_e, filePath: string) => {
-    const thDir = getThumbDir();
-    const outUrl = await ensureThumbnail(thDir, filePath, settings.thumbnail.width, settings.thumbnail.quality);
-    return outUrl; // file:// URL
-});
-
-ipcMain.handle('image:open', async (_e, filePath: string) => {
+/* -------------------------
+   File operations
+-------------------------- */
+ipcMain.handle('file:openInExplorer', async (_e, filePath: string) => {
     shell.showItemInFolder(filePath);
+    return true;
 });
-
-ipcMain.handle('image:copy', async (_e, _filePath: string) => {
-    return;
+ipcMain.handle('file:copyPath', async (_e, filePath: string) => {
+    const { clipboard } = require('electron');
+    clipboard.writeText(filePath);
+    return true;
 });
-
-ipcMain.handle('image:export-meta', async (_e, filePath: string) => {
-    const meta = await readMetadata(filePath);
-    const out = filePath + '.metadata.txt';
-    const lines: string[] = [];
-    if (meta.prompt) lines.push(`Prompt: ${meta.prompt}`);
-    if (meta.negative) lines.push(`Negative: ${meta.negative}`);
-    if (meta.model) lines.push(`Model: ${meta.model}`);
-    if (meta.sampler) lines.push(`Sampler: ${meta.sampler}`);
-    if (meta.steps !== undefined) lines.push(`Steps: ${meta.steps}`);
-    if (meta.cfgScale !== undefined) lines.push(`CFG: ${meta.cfgScale}`);
-    if (meta.seed !== undefined) lines.push(`Seed: ${meta.seed}`);
-    if (meta.size) lines.push(`Size: ${meta.size}`);
-    lines.push('');
-    lines.push('--- RAW ---');
-    lines.push(typeof meta.raw === 'string' ? meta.raw : JSON.stringify(meta.raw ?? meta.other ?? {}, null, 2));
-    await fs.writeFile(out, lines.join('\n'), 'utf8');
-    return out;
+ipcMain.handle('file:exportMetadata', async (_e, filePath: string, metaText: string) => {
+    const dir = path.dirname(filePath);
+    const base = path.basename(filePath, path.extname(filePath));
+    const target = path.join(dir, `${base}.metadata.txt`);
+    await fse.writeFile(target, metaText, 'utf8');
+    return target;
 });
-
-ipcMain.handle('image:fav', async (_e, filePath: string, fav: boolean) => {
-    await setFavorite(filePath, fav);
-    const f = await getFavorites();
-    injectFavorites(images, f);
-    win?.webContents.send('images:changed');
-});
-
-ipcMain.handle('image:move', async (_e, files: string[], dest: string) => {
-    await fs.ensureDir(dest);
-    for (const f of files) {
-        const base = path.basename(f);
-        await fs.move(f, path.join(dest, base), { overwrite: false });
-    }
-    const fMapPath = path.join(process.cwd(), 'config', 'favorites.json');
-    const json = await fs.readJSON(fMapPath).catch(() => ({ favorites: {} as Record<string, boolean> }));
-    for (const k of files) delete json.favorites[k];
-    await fs.writeJSON(fMapPath, json, { spaces: 2 });
-    win?.webContents.send('images:changed');
-});
-
-ipcMain.handle('image:delete', async (_e, files: string[]) => {
-    try {
-        const trashMod = await import('trash');
-        await (trashMod as any).default(files);
-    } catch {
-        const bin = path.join(settings.activeRoot || process.cwd(), '.nexus-trash');
-        await fs.ensureDir(bin);
-        for (const f of files) {
-            const base = path.basename(f);
-            await fs.move(f, path.join(bin, base), { overwrite: true });
+ipcMain.handle('file:delete', async (_e, filePaths: string[]) => {
+    for (const p of filePaths) {
+        try {
+            await shell.trashItem(p);
+        } catch {
+            if (fs.existsSync(p)) await fse.remove(p);
         }
     }
-    const fMapPath = path.join(process.cwd(), 'config', 'favorites.json');
-    const json = await fs.readJSON(fMapPath).catch(() => ({ favorites: {} as Record<string, boolean> }));
-    for (const k of files) delete json.favorites[k];
-    await fs.writeJSON(fMapPath, json, { spaces: 2 });
-    win?.webContents.send('images:changed');
+    return true;
+});
+ipcMain.handle('file:move', async (_e, filePaths: string[], targetDir: string) => {
+    await fse.ensureDir(targetDir);
+    for (const p of filePaths) {
+        const base = path.basename(p);
+        await fse.move(p, path.join(targetDir, base), { overwrite: false });
+    }
+    return true;
 });

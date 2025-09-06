@@ -1,50 +1,68 @@
-import React, { useEffect, useState } from 'react';
-import type { ImageItem } from '../types';
+// FILE: renderer/src/components/ImageCard.tsx
+import React from 'react';
+import { ImageItem } from '@/context/ImagesContext';
+import { useSettings } from '@/context/SettingsContext';
+import { toFileUrl } from '@/lib/fileurl';
 
-const ImageCard: React.FC<{ item: ImageItem; onOpen: (it: ImageItem) => void; }> = ({ item, onOpen }) => {
-    const [src, setSrc] = useState<string | null>(null);
+type Props = {
+    item: ImageItem;
+    onOpen: (it: ImageItem) => void;
+};
 
-    useEffect(() => {
-        let mounted = true;
+const ImageCard: React.FC<Props> = ({ item, onOpen }) => {
+    const { settings } = useSettings();
+
+    // Normalize any initial thumb path into a file:/// URL
+    const [src, setSrc] = React.useState<string | null>(item.thumb ? toFileUrl(item.thumb) : null);
+
+    React.useEffect(() => {
+        let cancelled = false;
+
+        // If the scanner already supplied a thumb path, just use it.
+        if (item.thumb) {
+            setSrc(toFileUrl(item.thumb));
+            return () => {
+                cancelled = true;
+            };
+        }
+
         (async () => {
             try {
-                const url = await window.api.getThumbnail(item.path); // already file://
-                if (mounted) setSrc(url);
+                const max = settings?.thumbnail?.maxSize ?? 512;
+                const thumbPath = await window.api.getThumbnail(item.path, max);
+                if (!cancelled) setSrc(toFileUrl(thumbPath));
             } catch {
-                if (mounted) setSrc(null);
+                if (!cancelled) setSrc(null);
             }
         })();
-        return () => { mounted = false; };
-    }, [item.path]);
+
+        return () => {
+            cancelled = true;
+        };
+    }, [item.path, item.thumb, settings?.thumbnail?.maxSize]);
 
     return (
-        <div className="relative rounded-xl2 border border-gray-800 overflow-hidden bg-gray-900 hover:border-brand-600 cursor-pointer" onClick={() => onOpen(item)}>
-            <div className="w-full h-48 bg-gray-950 flex items-center justify-center">
-                {src ? (
-                    <img
-                        src={src}
-                        alt={item.name}
-                        className="w-full h-full object-cover"
-                        draggable={false}
-                        onError={() => setSrc(null)}
-                    />
-                ) : (
-                    <div className="text-xs text-gray-500">image</div>
-                )}
-            </div>
+        <button
+            type="button"
+            className="rounded overflow-hidden bg-gray-900 border border-gray-800 text-left focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600"
+            onClick={() => onOpen(item)}
+            title={item.name}
+        >
+            {src ? (
+                <img
+                    src={src}
+                    alt={item.name}
+                    className="w-full h-[200px] object-cover bg-gray-800"
+                    draggable={false}
+                />
+            ) : (
+                <div className="w-full h-[200px] bg-gray-800" />
+            )}
             <div className="p-2">
                 <div className="text-sm truncate">{item.name}</div>
                 <div className="text-xs text-gray-400 truncate">{item.folder}</div>
             </div>
-            {item.nsfw && <span className="absolute top-1 left-1 text-[10px] px-1.5 py-0.5 rounded bg-gray-800/90">NSFW</span>}
-            <button
-                className="absolute top-1 right-1 px-1 py-0.5 rounded bg-gray-800 hover:bg-gray-700"
-                onClick={async (e) => { e.stopPropagation(); await window.api.setFavorite(item.path, !item.favorite); }}
-                title={item.favorite ? 'Unfavorite' : 'Favorite'}
-            >
-                {item.favorite ? '★' : '☆'}
-            </button>
-        </div>
+        </button>
     );
 };
 

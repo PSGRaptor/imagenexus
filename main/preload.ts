@@ -1,29 +1,46 @@
-import { contextBridge, ipcRenderer, shell, clipboard } from 'electron';
-import type { ImageItem, ImageMetadata, UserSettings, ScanResult } from './types';
+// Safe, explicit IPC bridge used by the renderer.
+// FILE: main/preload.ts
+import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('api', {
-    getSettings: (): Promise<UserSettings> => ipcRenderer.invoke('settings:get'),
-    setSettings: (s: UserSettings): Promise<void> => ipcRenderer.invoke('settings:set', s),
-    pickFolder: (): Promise<string | null> => ipcRenderer.invoke('settings:pick-folder'),
+    // Settings
+    getSettings: () => ipcRenderer.invoke('settings:get'),
+    saveSettings: (s: unknown) => ipcRenderer.invoke('settings:save', s),
+    setSettings: (s: unknown) => ipcRenderer.invoke('settings:save', s), // alias for older renderer
+    pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
+    // Legacy aliases the renderer might still use
+    pickFolderLegacy: () => ipcRenderer.invoke('settings:pick-folder'),
 
-    scan: (): Promise<ScanResult> => ipcRenderer.invoke('scanner:scan'),
-    startWatch: (): Promise<void> => ipcRenderer.invoke('watcher:start'),
-    stopWatch: (): Promise<void> => ipcRenderer.invoke('watcher:stop'),
-    onImagesChanged: (cb: () => void) => {
-        ipcRenderer.removeAllListeners('images:changed');
-        ipcRenderer.on('images:changed', cb);
+    // Scan & Watch
+    scanImages: (rootPath: string) => ipcRenderer.invoke('images:scan', rootPath),
+    startWatch: (rootPath: string) => ipcRenderer.invoke('images:watch:start', rootPath),
+    stopWatch: () => ipcRenderer.invoke('images:watch:stop'),
+    onWatchEvent: (cb: (payload: { evt: 'add' | 'unlink' | 'change'; file: string }) => void) => {
+        const channel = 'images:watch:event';
+        const handler = (_: unknown, payload: any) => cb(payload);
+        ipcRenderer.on(channel, handler);
+        return () => ipcRenderer.removeListener(channel, handler);
     },
 
-    getMetadata: (filePath: string): Promise<ImageMetadata> => ipcRenderer.invoke('image:metadata', filePath),
-    getThumbnail: (filePath: string): Promise<string> => ipcRenderer.invoke('image:thumbnail', filePath),
-    openInExplorer: (filePath: string) => ipcRenderer.invoke('image:open', filePath),
-    copyPath: (filePath: string) => ipcRenderer.invoke('image:copy', filePath),
-    exportMetadata: (filePath: string): Promise<string> => ipcRenderer.invoke('image:export-meta', filePath),
-    setFavorite: (filePath: string, fav: boolean): Promise<void> => ipcRenderer.invoke('image:fav', filePath, fav),
-    batchMove: (files: string[], dest: string): Promise<void> => ipcRenderer.invoke('image:move', files, dest),
-    batchDelete: (files: string[]): Promise<void> => ipcRenderer.invoke('image:delete', files),
+    // Metadata & Thumbnails
+    getMetadata: (filePath: string) => ipcRenderer.invoke('image:metadata', filePath),
+    getThumbnail: (filePath: string, maxSize: number) =>
+        ipcRenderer.invoke('image:thumbnail', filePath, maxSize),
 
-    // Clipboard helpers (renderer-safe fallbacks)
-    writeText: (text: string) => clipboard.writeText(text),
-    shellOpenExternal: (url: string) => shell.openExternal(url)
+    // Favorites
+    toggleFavorite: (filePath: string) => ipcRenderer.invoke('favorites:toggle', filePath),
+    isFavorite: (filePath: string) => ipcRenderer.invoke('favorites:is', filePath),
+    listFavorites: () => ipcRenderer.invoke('favorites:list'),
+
+    // File ops
+    openInExplorer: (filePath: string) => ipcRenderer.invoke('file:openInExplorer', filePath),
+    copyPath: (filePath: string) => ipcRenderer.invoke('file:copyPath', filePath),
+    exportMetadata: (filePath: string, text: string) =>
+        ipcRenderer.invoke('file:exportMetadata', filePath, text),
+    deleteFiles: (paths: string[]) => ipcRenderer.invoke('file:delete', paths),
+    moveFiles: (paths: string[], targetDir: string) =>
+        ipcRenderer.invoke('file:move', paths, targetDir),
+
+    // Utility
+    shellOpenExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
 });

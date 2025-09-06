@@ -1,19 +1,22 @@
 import fs from 'fs-extra';
 import path from 'path';
 import extractChunks, { PngChunk } from 'png-chunks-extract';
-import decodeText, { PngTextChunk } from 'png-chunk-text';
-import { ImageMetadata } from './types';
+import decodeText from 'png-chunk-text';
+import type { ImageMetadata } from './types';
 
-// Dynamic import for ESM modules at runtime
+// exifr supports JPG/JPEG/WEBP/XMP
 async function exifrParse(file: string) {
-    const exifr = await import('exifr');
-    // exifr.parse handles JPG/WEBP EXIF/XMP
-    return (exifr as any).parse(file).catch(() => null);
+    try {
+        const exifr = await import('exifr');
+        // some builds expose default, some named
+        const parse = (exifr as any).parse || (exifr as any).default?.parse || (exifr as any).default;
+        return parse ? parse(file) : null;
+    } catch {
+        return null;
+    }
 }
 
 function parseA1111ParamsBlock(block: string): Partial<ImageMetadata> {
-    // Typical A1111 "parameters" text block
-    // "prompt text\nNegative prompt: ...\nSteps: 20, Sampler: Euler a, CFG scale: 7, Seed: 123, Size: 512x512, Model: ..."
     const lines = block.split(/\r?\n/);
     let prompt = '';
     let negative = '';
@@ -30,108 +33,116 @@ function parseA1111ParamsBlock(block: string): Partial<ImageMetadata> {
         }
     }
 
-    const settingsLine = rest.join(' ');
+    const settings = rest.join(' ');
     const meta: Partial<ImageMetadata> = { prompt, negative };
-    const get = (label: string) => {
-        const m = new RegExp(`${label}\\s*:\\s*([^,]+)`, 'i').exec(settingsLine);
+
+    const pick = (label: string) => {
+        const m = new RegExp(`${label}\\s*:\\s*([^,]+)`, 'i').exec(settings);
         return m ? m[1].trim() : undefined;
     };
 
-    meta.steps = Number(get('Steps'));
-    meta.sampler = get('Sampler');
-    meta.cfgScale = Number(get('CFG scale') || get('CFG'));
-    meta.seed = get('Seed');
-    meta.size = get('Size');
-    meta.model = get('Model') || get('Model hash') || get('Model hash (sd)');
+    meta.steps   = Number(pick('Steps'));
+    meta.sampler = pick('Sampler');
+    meta.cfgScale= Number(pick('CFG scale') || pick('CFG'));
+    meta.seed    = pick('Seed');
+    meta.size    = pick('Size');
+    meta.model   = pick('Model') || pick('Model hash') || pick('Model hash \\(sd\\)');
     return meta;
 }
 
-function detectGenerator(keys: string[], kv: Record<string, string>): ImageMetadata['generator'] {
-    const all = keys.map(k => k.toLowerCase());
-    if (all.includes('parameters')) return 'automatic1111';
-    if (all.includes('json') || all.includes('prompt') || all.includes('workflow')) return 'comfyui';
-    // Heuristics for others via fields often used:
-    if (kv['invokeai']) return 'invokeai';
-    if (kv['sdnext']) return 'sdnext';
-    if (kv['fooocus']) return 'fooocus';
-    if (kv['novelai']) return 'novelai';
+function detectGenerator(kv: Record<string,string>): ImageMetadata['generator'] {
+    const keys = Object.keys(kv).map(k => k.toLowerCase());
+    if (keys.includes('parameters')) return 'automatic1111';
+    if (keys.includes('prompt') || keys.includes('workflow') || keys.includes('json')) return 'comfyui';
+    if ('invokeai' in kv) return 'invokeai';
+    if ('sdnext' in kv) return 'sdnext';
+    if ('fooocus' in kv) return 'fooocus';
+    if ('novelai' in kv) return 'novelai';
     return 'unknown';
+}
+
+function tryBruteFindParams(buf: Buffer): string|undefined {
+    // fallback: pull a text window around 'Negative prompt:' if chunk decode failed
+    const needle = Buffer.from('Negative prompt:');
+    const i = buf.indexOf(needle);
+    if (i < 0) return undefined;
+    // scan back a bit to include the positive prompt line
+    const start = Math.max(0, i - 2000);
+    // and forward some for settings line
+    const end   = Math.min(buf.length, i + 4000);
+    const slice = buf.subarray(start, end).toString('utf8');
+    // try to trim at next PNG IDAT boundary if any (heuristic)
+    const stop = slice.indexOf('\x00IDAT');
+    return stop > 0 ? slice.slice(0, stop) : slice;
 }
 
 export async function readMetadata(filePath: string): Promise<ImageMetadata> {
     const ext = path.extname(filePath).toLowerCase();
-    // Sidecar discovery
     const base = filePath.replace(/\.(png|jpg|jpeg|webp)$/i, '');
     const sideTxt = `${base}.txt`;
     const sideJson = `${base}.json`;
 
-    // Try embedded first
+    // ---- PNG embedded ----
     if (ext === '.png') {
         try {
             const buf = await fs.readFile(filePath);
-            const chunks: PngChunk[] = extractChunks(buf);
-            const texts: PngTextChunk[] = chunks
-                .filter((c: PngChunk) => c.name === 'tEXt' || c.name === 'iTXt')
-                .map((c: PngChunk) => {
-                    try {
-                        return decodeText(c);
-                    } catch {
-                        return null as unknown as PngTextChunk;
+            let kv: Record<string,string> = {};
+
+            try {
+                const chunks: PngChunk[] = extractChunks(buf);
+                for (const c of chunks) {
+                    if (c.name === 'tEXt' || c.name === 'iTXt') {
+                        try {
+                            const t = decodeText(c) as { keyword: string; text: string };
+                            if (t?.keyword) kv[t.keyword] = t.text ?? '';
+                        } catch {/* ignore non-text or malformed */}
                     }
-                })
-                .filter((x: PngTextChunk | null): x is PngTextChunk => Boolean(x));
+                }
+            } catch {/* if chunk extraction fails, try brute below */}
 
-            const kv: Record<string, string> = {};
-            for (const t of texts) kv[t.keyword] = t.text;
-
-            const keys = Object.keys(kv);
-            if (keys.length) {
-                const gen = detectGenerator(keys, kv);
+            if (Object.keys(kv).length) {
+                const gen = detectGenerator(kv);
                 if (gen === 'automatic1111' && kv['parameters']) {
                     const partial = parseA1111ParamsBlock(kv['parameters']);
                     return { source: 'embedded', generator: gen, ...partial, other: kv, raw: kv };
                 }
                 if (gen === 'comfyui') {
-                    // ComfyUI often stores JSON under 'prompt' or 'workflow' or 'json'
                     const rawStr = kv['prompt'] || kv['workflow'] || kv['json'];
-                    let rawObj: any = rawStr;
-                    try { rawObj = JSON.parse(rawStr); } catch {}
-                    return {
-                        source: 'embedded',
-                        generator: gen,
-                        // Attempt prompt extraction (best-effort)
-                        prompt: typeof rawObj === 'object' ? undefined : rawStr,
-                        other: kv,
-                        raw: rawObj ?? kv
-                    };
+                    let rawObj: any = undefined;
+                    if (rawStr) { try { rawObj = JSON.parse(rawStr); } catch { /* keep string */ } }
+                    return { source: 'embedded', generator: gen, prompt: undefined, other: kv, raw: rawObj ?? kv };
                 }
-                // Unknown PNG metadata; return raw
-                return { source: 'embedded', generator: detectGenerator(keys, kv), other: kv, raw: kv };
+                // fallback: return raw kv
+                return { source: 'embedded', generator: gen, other: kv, raw: kv };
             }
-        } catch {
-            /* fallthrough */
-        }
-    } else if (ext === '.jpg' || ext === '.jpeg' || ext === '.webp') {
-        try {
-            const exif = await exifrParse(filePath);
-            if (exif) {
-                const textFields = ['UserComment', 'ImageDescription', 'XPComment', 'Description'] as const;
-                let found: string | undefined = undefined;
-                for (const f of textFields) {
-                    if ((exif as any)[f]) { found = String((exif as any)[f]); break; }
-                }
-                if (found) {
-                    const partial = parseA1111ParamsBlock(found);
-                    return { source: 'embedded', generator: 'unknown', ...partial, other: exif, raw: exif };
-                }
-                return { source: 'embedded', generator: 'unknown', other: exif, raw: exif };
+
+            // Brute scan: some A1111 builds write odd iTXt/zTXt; pull the block anyway
+            const block = tryBruteFindParams(buf);
+            if (block) {
+                const partial = parseA1111ParamsBlock(block);
+                return { source: 'embedded', generator: 'automatic1111', ...partial, raw: block };
             }
-        } catch {
-            /* fallthrough */
+        } catch {/* fall through */}
+    }
+
+    // ---- JPG/JPEG/WEBP embedded via exifr ----
+    if (ext === '.jpg' || ext === '.jpeg' || ext === '.webp') {
+        const exif = await exifrParse(filePath).catch(() => null);
+        if (exif) {
+            const fields = ['UserComment', 'ImageDescription', 'XPComment', 'Description'];
+            let found: string | undefined;
+            for (const f of fields) {
+                if ((exif as any)[f]) { found = String((exif as any)[f]); break; }
+            }
+            if (found) {
+                const partial = parseA1111ParamsBlock(found);
+                return { source: 'embedded', generator: 'unknown', ...partial, other: exif as any, raw: exif as any };
+            }
+            return { source: 'embedded', generator: 'unknown', other: exif as any, raw: exif as any };
         }
     }
 
-    // Sidecar discovery
+    // ---- Sidecars ----
     if (await fs.pathExists(sideTxt)) {
         const txt = await fs.readFile(sideTxt, 'utf8');
         const partial = parseA1111ParamsBlock(txt);
@@ -140,7 +151,6 @@ export async function readMetadata(filePath: string): Promise<ImageMetadata> {
     if (await fs.pathExists(sideJson)) {
         try {
             const json = await fs.readJSON(sideJson);
-            // Try comfy style fields, or generic
             const prompt = json.prompt || json.positive || json.text || '';
             const negative = json.negative || json.negative_prompt || '';
             return { source: 'sidecar', generator: 'comfyui', prompt, negative, other: json, raw: json };

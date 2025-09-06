@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 type Props = {
     filePath: string;
@@ -9,23 +9,49 @@ type Props = {
 
 const ImageCard: React.FC<Props> = ({ filePath, name, folder, onClick }) => {
     const [src, setSrc] = useState<string | null>(null);
+    const [isVisible, setVisible] = useState(false);
+    const ref = useRef<HTMLDivElement | null>(null);
 
+    // Observe visibility to lazy request thumbnails
     useEffect(() => {
-        let mounted = true;
+        const el = ref.current;
+        if (!el) return;
+        const io = new IntersectionObserver(
+            (entries) => {
+                const e = entries[0];
+                if (e && e.isIntersecting) {
+                    setVisible(true);
+                } else {
+                    setVisible(false);
+                }
+            },
+            { root: null, rootMargin: '300px 0px', threshold: 0.01 }
+        );
+        io.observe(el);
+        return () => io.disconnect();
+    }, []);
+
+    // Request thumbnail only when visible (and when filePath changes)
+    useEffect(() => {
+        if (!isVisible) return;
+        let cancelled = false;
         (async () => {
             try {
                 const url = await window.api.getThumbnail(filePath); // returns file:// URL
-                if (mounted) setSrc(url);
+                if (!cancelled) setSrc(url);
             } catch {
-                if (mounted) setSrc(null);
+                if (!cancelled) setSrc(null);
             }
         })();
-        return () => { mounted = false; };
-    }, [filePath]);
+        return () => {
+            cancelled = true;
+        };
+    }, [isVisible, filePath]);
 
     return (
-        <button
-            className="group relative rounded-lg overflow-hidden border border-gray-800 bg-gray-900 hover:border-gray-700 focus:outline-none"
+        <div
+            ref={ref}
+            className="group relative rounded-lg overflow-hidden border border-gray-800 bg-gray-900 hover:border-gray-700"
             onClick={onClick}
             title={name}
         >
@@ -37,16 +63,17 @@ const ImageCard: React.FC<Props> = ({ filePath, name, folder, onClick }) => {
                         className="h-full w-full object-cover select-none"
                         draggable={false}
                         loading="lazy"
+                        onError={() => setSrc(null)}
                     />
                 ) : (
-                    <div className="text-xs text-gray-500">image</div>
+                    <div className="text-[10px] text-gray-500">loading…</div>
                 )}
             </div>
             <div className="px-2 py-1 text-left">
                 <div className="text-[11px] text-gray-300 truncate">{name}</div>
                 <div className="text-[10px] text-gray-500 truncate">{folder}</div>
             </div>
-        </button>
+        </div>
     );
 };
 

@@ -1,6 +1,6 @@
 {
   "name": "image-nexus",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Image Nexus — prompt/metadata viewer for AI image output folders.",
   "author": "PSGRaptor",
   "license": "MIT",

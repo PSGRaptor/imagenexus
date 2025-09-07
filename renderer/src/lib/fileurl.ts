@@ -1,13 +1,8 @@
-// Convert a Windows/Unix path to a valid file:// URL usable in <img src>
-// - Ensures triple slash
-// - Replaces backslashes with forward slashes
-export function toFileUrl(p: string | undefined | null): string | null {
+// Convert a Windows/Unix absolute path (or an existing file:// path)
+// into a valid URL for <img src>.
+export function toFileUrl(p?: string | null): string | null {
     if (!p) return null;
-    const withSlashes = p.replace(/\\/g, '/');
-    // If it already starts with file://, normalize to file:///
-    if (/^file:\/\//i.test(withSlashes)) {
-        const noProto = withSlashes.replace(/^file:\/+/, '');
-        return `file:///${noProto}`;
-    }
-    return `file:///${withSlashes}`;
+    let s = p.startsWith('file:') ? p.replace(/^file:\/*/i, '') : p;
+    s = s.replace(/\\/g, '/'); // Windows backslashes -> forward slashes
+    return `file:///${s}`;
 }

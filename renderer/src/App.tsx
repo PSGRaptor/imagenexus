@@ -65,7 +65,7 @@ const ShellInner: React.FC = () => {
 
     return (
         <div className="h-screen w-screen grid grid-cols-[260px_1fr] grid-rows-[56px_1fr]">
-            <Header onOpenAbout={() => setAboutOpen(true)} onOpenSettings={() => setSettingsOpen(true)} />
+            <Header className="col-span-2" onOpenAbout={() => setAboutOpen(true)} onOpenSettings={() => setSettingsOpen(true)} />
             <Sidebar />
             <main className="row-start-2 col-start-2 overflow-auto p-4">
                 <ImageGrid onOpenImage={(p: string) => setImageOpen(p)} />

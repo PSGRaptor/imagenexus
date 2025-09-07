@@ -3,7 +3,7 @@ import { useImages, ImageItem } from '@/context/ImagesContext';
 import ImageCard from '@/components/ImageCard';
 
 const ImageGrid: React.FC<{ onOpenImage: (path: string) => void }> = ({ onOpenImage }) => {
-    const { filtered, setSelected, selected } = useImages();
+    const { filtered } = useImages();
 
     const openAt = (idx: number) => {
         const it = filtered[idx];
@@ -11,9 +11,14 @@ const ImageGrid: React.FC<{ onOpenImage: (path: string) => void }> = ({ onOpenIm
     };
 
     return (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
+        <div className="grid gap-3"
+             style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
             {filtered.map((it, i) => (
-                <ImageCard key={it.path} item={it} onOpen={() => openAt(i)} />
+                <ImageCard
+                    key={it.path}
+                    item={it}
+                    onOpen={(item: ImageItem) => openAt(i)}
+                />
             ))}
         </div>
     );

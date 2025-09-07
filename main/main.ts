@@ -32,7 +32,7 @@ async function createWindow() {
 
     mainWindow = new BrowserWindow({
         width: 1280,
-        height: 800,
+        height: 900,
         backgroundColor: '#111827',
         show: true, // show immediately
         webPreferences: {
@@ -41,6 +41,7 @@ async function createWindow() {
             contextIsolation: true,
             sandbox: false,
             devTools: true, // allow manual open
+            webSecurity: false,
         },
     });
 

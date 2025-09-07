@@ -3,7 +3,12 @@ import { ImageItem } from '@/context/ImagesContext';
 import { useSettings } from '@/context/SettingsContext';
 import { toFileUrl } from '@/lib/fileurl';
 
-const ImageCard: React.FC<{ item: ImageItem; onOpen: (it: ImageItem) => void }> = ({ item, onOpen }) => {
+type Props = {
+    item: ImageItem;
+    onOpen: (it: ImageItem) => void;
+};
+
+const ImageCard: React.FC<Props> = ({ item, onOpen }) => {
     const { settings } = useSettings();
     const [src, setSrc] = React.useState<string | null>(item.thumb ? toFileUrl(item.thumb) : null);
 
@@ -12,14 +17,14 @@ const ImageCard: React.FC<{ item: ImageItem; onOpen: (it: ImageItem) => void }> 
 
         if (item.thumb) {
             setSrc(toFileUrl(item.thumb));
-            return;
+            return () => { cancelled = true; };
         }
 
         (async () => {
             try {
                 const max = settings?.thumbnail?.maxSize ?? 512;
-                const pathOrUrl = await window.api.getThumbnail(item.path, max);
-                if (!cancelled) setSrc(toFileUrl(pathOrUrl));
+                const thumbPath = await window.api.getThumbnail(item.path, max);
+                if (!cancelled) setSrc(toFileUrl(thumbPath));
             } catch {
                 if (!cancelled) setSrc(null);
             }
@@ -30,15 +35,22 @@ const ImageCard: React.FC<{ item: ImageItem; onOpen: (it: ImageItem) => void }> 
 
     return (
         <button
-            className="rounded overflow-hidden bg-gray-900 border border-gray-800 text-left"
+            type="button"
+            className="rounded overflow-hidden bg-gray-900 border border-gray-800 text-left focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600"
             onClick={() => onOpen(item)}
             title={item.name}
         >
-            {src ? (
-                <img src={src} alt={item.name} className="w-full h-[200px] object-cover" />
-            ) : (
-                <div className="w-full h-[200px] bg-gray-800" />
-            )}
+            {/* 3:4 container; image scales with object-cover */}
+            <div style={{ aspectRatio: '3 / 4' }} className="w-full bg-gray-800">
+                {src ? (
+                    <img
+                        src={src}
+                        alt={item.name}
+                        className="w-full h-full object-cover"
+                        draggable={false}
+                    />
+                ) : null}
+            </div>
             <div className="p-2">
                 <div className="text-sm truncate">{item.name}</div>
                 <div className="text-xs text-gray-400 truncate">{item.folder}</div>

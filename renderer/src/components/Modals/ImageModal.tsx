@@ -1,5 +1,7 @@
+// FILE: renderer/src/components/Modals/ImageModal.tsx
 import React from 'react';
 import { ImageItem, ImageMetadata } from '@/context/ImagesContext';
+import { toFileUrl } from '@/lib/fileurl';
 
 type Props = {
     open?: boolean;
@@ -9,22 +11,23 @@ type Props = {
     onPrev?: () => void;
 };
 
-const Panel: React.FC<{ title: string; children: React.ReactNode; defaultOpen?: boolean }> = ({
-                                                                                                  title,
-                                                                                                  children,
-                                                                                                  defaultOpen = true,
-                                                                                              }) => {
-    const [open, setOpen] = React.useState(defaultOpen);
+const Panel: React.FC<{
+    title: string;
+    defaultOpen?: boolean;
+    children: React.ReactNode;
+}> = ({ title, defaultOpen = true, children }) => {
+    const [isOpen, setIsOpen] = React.useState(defaultOpen);
     return (
         <div className="border border-gray-800 rounded-lg overflow-hidden">
             <button
+                type="button"
                 className="w-full text-left px-3 py-2 bg-gray-900 hover:bg-gray-800 flex items-center justify-between"
-                onClick={() => setOpen((v) => !v)}
+                onClick={() => setIsOpen((v) => !v)}
             >
                 <span className="font-medium">{title}</span>
-                <span className="text-gray-400">{open ? '▾' : '▸'}</span>
+                <span className="text-gray-400">{isOpen ? '▾' : '▸'}</span>
             </button>
-            {open && <div className="p-3 text-sm">{children}</div>}
+            {isOpen && <div className="p-3 text-sm">{children}</div>}
         </div>
     );
 };
@@ -32,7 +35,7 @@ const Panel: React.FC<{ title: string; children: React.ReactNode; defaultOpen?: 
 const ImageModal: React.FC<Props> = ({ open = false, item, onClose, onNext, onPrev }) => {
     const [meta, setMeta] = React.useState<ImageMetadata | null>(null);
 
-    // Load metadata when item changes
+    // Load metadata when the selected item changes
     React.useEffect(() => {
         let ignore = false;
         (async () => {
@@ -52,7 +55,7 @@ const ImageModal: React.FC<Props> = ({ open = false, item, onClose, onNext, onPr
         };
     }, [item?.path]);
 
-    // Keyboard shortcuts: Esc, ←, →
+    // Keyboard shortcuts: Esc to close, ← / → to navigate
     React.useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
             if (!open) return;
@@ -66,14 +69,7 @@ const ImageModal: React.FC<Props> = ({ open = false, item, onClose, onNext, onPr
 
     if (!open) return null;
 
-    const copy = (text: string) => {
-        try {
-            navigator.clipboard?.writeText(text);
-        } catch {
-            // ignore
-        }
-    };
-
+    const src = toFileUrl(item?.path);
     const prompt = meta?.prompt ?? '';
     const negative = meta?.negative ?? '';
     const gen = meta?.generator ?? '';
@@ -87,79 +83,113 @@ const ImageModal: React.FC<Props> = ({ open = false, item, onClose, onNext, onPr
         Generator: gen,
     };
 
+    const copyText = (text: string) => {
+        try {
+            navigator.clipboard?.writeText(text);
+        } catch {
+            /* no-op */
+        }
+    };
+
     return (
         <div className="fixed inset-0 bg-black/75 flex items-center justify-center z-50">
             <div className="w-[92vw] h-[92vh] bg-gray-950 border border-gray-800 rounded-xl grid grid-cols-[1fr_420px] overflow-hidden">
-                {/* Image side */}
+                {/* LEFT: full image */}
                 <div className="bg-black flex items-center justify-center p-3">
-                    {item?.path ? (
+                    {src ? (
                         <img
-                            src={`file://${item.path}`}
-                            alt={item.name}
-                            className="max-w-full max-h-full object-contain"
+                            src={src}
+                            alt={item?.name || ''}
+                            className="max-w-full max-h-[calc(92vh-24px)] object-contain"
+                            draggable={false}
                         />
                     ) : (
                         <div className="text-gray-400">No image</div>
                     )}
                 </div>
 
-                {/* Metadata side */}
+                {/* RIGHT: metadata & actions */}
                 <div className="bg-gray-950 p-3 space-y-3 overflow-auto">
+                    {/* Header row: filename + controls */}
                     <div className="flex items-center justify-between">
                         <div>
-                            <div className="font-medium">{item?.name}</div>
-                            <div className="text-xs text-gray-400">{item?.folder}</div>
+                            <div className="font-medium truncate max-w-[260px]" title={item?.name}>
+                                {item?.name}
+                            </div>
+                            <div className="text-xs text-gray-400 truncate max-w-[260px]" title={item?.folder}>
+                                {item?.folder}
+                            </div>
                         </div>
                         <div className="flex gap-2">
-                            <button className="px-2 py-1 rounded bg-gray-800 border border-gray-700" onClick={() => onPrev?.()}>
+                            <button
+                                className="px-2 py-1 rounded bg-gray-800 border border-gray-700"
+                                onClick={() => onPrev?.()}
+                                title="Previous (←)"
+                            >
                                 ←
                             </button>
-                            <button className="px-2 py-1 rounded bg-gray-800 border border-gray-700" onClick={() => onNext?.()}>
+                            <button
+                                className="px-2 py-1 rounded bg-gray-800 border border-gray-700"
+                                onClick={() => onNext?.()}
+                                title="Next (→)"
+                            >
                                 →
                             </button>
-                            <button className="px-2 py-1 rounded bg-gray-800 border border-gray-700" onClick={() => onClose?.()}>
+                            <button
+                                className="px-2 py-1 rounded bg-gray-800 border border-gray-700"
+                                onClick={() => onClose?.()}
+                                title="Close (Esc)"
+                            >
                                 Close
                             </button>
                         </div>
                     </div>
 
-                    <div className="flex gap-2">
+                    {/* Quick actions */}
+                    <div className="flex flex-wrap gap-2">
                         <button
                             className="px-2 py-1 rounded bg-gray-800 border border-gray-700"
-                            onClick={() => copy([prompt, negative && `Negative: ${negative}`].filter(Boolean).join('\n\n'))}
+                            onClick={() =>
+                                copyText([prompt, negative && `Negative: ${negative}`].filter(Boolean).join('\n\n'))
+                            }
                             title="Copy Prompt"
                         >
                             Copy Prompt
                         </button>
                         <button
                             className="px-2 py-1 rounded bg-gray-800 border border-gray-700"
-                            onClick={() => copy(JSON.stringify(meta ?? {}, null, 2))}
-                            title="Copy All"
+                            onClick={() => copyText(JSON.stringify(meta ?? {}, null, 2))}
+                            title="Copy All Metadata (JSON)"
                         >
                             Copy All
                         </button>
                         <button
                             className="px-2 py-1 rounded bg-gray-800 border border-gray-700"
                             onClick={() => (window as any).api?.openInExplorer?.(item?.path)}
-                            title="Show in Explorer"
+                            title="Open in Explorer"
                         >
                             Show in Explorer
                         </button>
                         <button
                             className="px-2 py-1 rounded bg-gray-800 border border-gray-700"
                             onClick={() => (window as any).api?.copyPath?.(item?.path)}
-                            title="Copy Path"
+                            title="Copy File Path"
                         >
                             Copy Path
                         </button>
                     </div>
 
+                    {/* Collapsible panels */}
                     <Panel title="Prompt" defaultOpen>
-                        <pre className="whitespace-pre-wrap text-sm">{prompt || <span className="text-gray-500">—</span>}</pre>
+            <pre className="whitespace-pre-wrap text-sm">
+              {prompt || <span className="text-gray-500">—</span>}
+            </pre>
                     </Panel>
 
                     <Panel title="Negative Prompt">
-                        <pre className="whitespace-pre-wrap text-sm">{negative || <span className="text-gray-500">—</span>}</pre>
+            <pre className="whitespace-pre-wrap text-sm">
+              {negative || <span className="text-gray-500">—</span>}
+            </pre>
                     </Panel>
 
                     <Panel title="Generation Settings">
@@ -167,8 +197,8 @@ const ImageModal: React.FC<Props> = ({ open = false, item, onClose, onNext, onPr
                             <tbody>
                             {Object.entries(settings).map(([k, v]) => (
                                 <tr key={k} className="border-b border-gray-800 last:border-none">
-                                    <td className="py-1 pr-3 text-gray-400">{k}</td>
-                                    <td className="py-1">{v ?? <span className="text-gray-500">—</span>}</td>
+                                    <td className="py-1 pr-3 text-gray-400 align-top">{k}</td>
+                                    <td className="py-1 break-all">{v ?? <span className="text-gray-500">—</span>}</td>
                                 </tr>
                             ))}
                             </tbody>

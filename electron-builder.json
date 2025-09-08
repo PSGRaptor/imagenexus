@@ -1,7 +1,9 @@
 {
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
   "appId": "com.psgraptor.imagenexus",
   "productName": "Image Nexus",
   "files": [
+    ".vite/**",
     "dist/**",
     "renderer/**",
     "config/**",
@@ -13,15 +15,22 @@
     "buildResources": "resources"
   },
   "asar": true,
+  "asarUnpack": [
+    "**/*.node",
+    "node_modules/sharp/**",
+    "node_modules/@img/**"
+  ],
   "win": {
     "target": ["nsis"],
-    "icon": "resources/icon.ico",
+    "icon": "assets/icons/icon.png",
     "artifactName": "ImageNexus-${version}-win-${arch}.${ext}"
   },
   "nsis": {
     "oneClick": false,
+    "perMachine": false,
     "allowToChangeInstallationDirectory": true,
-    "createDesktopShortcut": true,
-    "createStartMenuShortcut": true
+    "installerIcon": "assets/icons/icon.ico",
+    "uninstallerIcon": "assets/icons/icon.ico",
+    "shortcutName": "Image Nexus"
   }
 }

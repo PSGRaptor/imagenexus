@@ -1,6 +1,6 @@
 {
   "name": "image-nexus",
-  "version": "0.1.7",
+  "version": "0.1.9",
   "description": "Image Nexus — prompt & metadata viewer for AI output folders (Windows-first)",
   "main": ".vite/build/main/main.cjs",
   "type": "module",
@@ -10,10 +10,13 @@
     "dev": "npx electron-forge start",
     "start": "npx electron-forge start",
     "make": "npx electron-forge make",
-    "build": "npx electron-builder -c electron-builder.json",
-    "package": "npx electron-builder --dir -c electron-builder.json",
+    "build:vite": "vite build -c vite.main.config.ts && vite build -c vite.preload.config.ts && vite build -c renderer/vite.config.ts",
+    "build": "npm run build:vite && npx electron-builder -c electron-builder.json",
+    "package": "npm run build:vite && npx electron-builder --dir -c electron-builder.json",
+    "dist:win": "npm run build:vite && npx electron-builder -w -c electron-builder.json",
     "lint": "tsc --noEmit",
-    "clean": "rimraf .vite build dist out node_modules"
+    "clean": "rimraf .vite build dist out node_modules",
+    "icons": "node scripts/generate-icons.mjs"
   },
   "dependencies": {
     "chokidar": "^3.6.0",
@@ -46,6 +49,7 @@
     "autoprefixer": "^10.4.19",
     "electron": "^30.0.9",
     "electron-builder": "^24.13.3",
+    "icon-gen": "^5.0.0",
     "postcss": "^8.4.41",
     "rimraf": "^5.0.7",
     "tailwindcss": "^3.4.10",

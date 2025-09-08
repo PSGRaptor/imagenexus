@@ -21,10 +21,13 @@ async function loadRenderer(win: BrowserWindow) {
         process.env.ELECTRON_RENDERER_URL ||
         process.env.VITE_DEV_SERVER_URL ||
         'http://localhost:5173/';
-    if (isDev) {
+
+    if (!app.isPackaged) {
         await win.loadURL(devUrl);
     } else {
-        const indexPath = path.join(__dirname, '../../.vite/build/renderer/index.html');
+        // We are running from: app.asar/.vite/build/main/main.cjs
+        // Renderer is at:      app.asar/.vite/build/renderer/index.html
+        const indexPath = path.join(__dirname, '../renderer/index.html');
         await win.loadFile(indexPath);
     }
 }

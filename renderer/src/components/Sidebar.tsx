@@ -1,6 +1,7 @@
 import React from 'react';
 import { useSettings } from '@/context/SettingsContext';
 import { useImages } from '@/context/ImagesContext';
+import btn from '@/styles/Buttons.module.css';
 
 const Sidebar: React.FC = () => {
     const { settings, setSettings } = useSettings();
@@ -25,33 +26,30 @@ const Sidebar: React.FC = () => {
 
         await setSettings({ ...(settings as any), roots, activeRoot: chosen, sources });
         setPathInput(chosen);
-
-        // Auto-activate: scan immediately
         try { await rescan(); } catch {}
     };
 
-    const activate = async () => { await rescan(); };
-
     return (
-        <aside className="row-start-2 col-start-1 p-3 border-r border-gray-800 bg-gray-900">
+        <aside className="row-start-2 col-start-1 p-3 bg-gray-50 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800">
             <div className="space-y-3">
+                {/* Root picker */}
                 <div>
-                    <div className="text-xs text-gray-400 mb-1">Root</div>
+                    <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Root</div>
                     <div className="flex gap-2">
                         <input
-                            className="flex-1 px-2 py-1 rounded bg-gray-800 border border-gray-700"
+                            className="flex-1 px-2 py-1 rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700"
                             value={pathInput}
                             onChange={e => setPathInput(e.target.value)}
                             placeholder="Select an image folder…"
                         />
-                        <button className="px-2 rounded bg-gray-800 border border-gray-700" onClick={chooseFolder}>Pick</button>
-                        <button className="px-2 rounded bg-blue-600 text-white border border-blue-500" onClick={activate}>Activate</button>
+                        <button className={btn.btnPrimary} onClick={chooseFolder}>Pick</button>
                     </div>
                 </div>
 
+                {/* Filters / toggles */}
                 <div className="flex items-center gap-2">
                     <button
-                        className="px-2 rounded bg-gray-800 border border-gray-700"
+                        className={btn.btnPrimary}
                         onClick={() => setFilters({ favoritesOnly: !filters.favoritesOnly })}
                         title="Toggle favorites filter"
                     >
@@ -77,16 +75,16 @@ const Sidebar: React.FC = () => {
                             checked={settings?.watch ?? true}
                             onChange={async e => {
                                 await setSettings({ ...(settings as any), watch: e.target.checked });
-                                // ImagesContext restarts watch automatically when settings change
                             }}
                         />
                         <span>Watch</span>
                     </label>
                 </div>
 
+                {/* Search */}
                 <div>
                     <input
-                        className="w-full px-2 py-1 rounded bg-gray-800 border border-gray-700"
+                        className="w-full px-2 py-1 rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700"
                         placeholder="Filename / prompt search…"
                         value={filters.query}
                         onChange={e => setFilters({ query: e.target.value })}

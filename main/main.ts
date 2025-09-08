@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, dialog, Menu, nativeTheme } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import fse from 'fs-extra';
@@ -11,9 +11,11 @@ import { makeThumbnail } from './thumbnails';
 import { getFavorites, isFavorite, toggleFavorite } from './favorites';
 
 let mainWindow: BrowserWindow | null = null;
-
 const isDev = !app.isPackaged;
 
+/* -------------------------
+   Helpers for renderer load
+-------------------------- */
 async function loadRenderer(win: BrowserWindow) {
     const devUrl =
         process.env.ELECTRON_RENDERER_URL ||
@@ -27,31 +29,58 @@ async function loadRenderer(win: BrowserWindow) {
     }
 }
 
+/* -------------------------
+   Create the window
+-------------------------- */
 async function createWindow() {
     await ensureSettings();
 
     mainWindow = new BrowserWindow({
         width: 1280,
-        height: 900,
+        height: 800,
         backgroundColor: '#111827',
-        show: true, // show immediately
+        show: true,
+        autoHideMenuBar: true,          // 💡 hides native menu bar (Win/Linux)
+        // NOTE: macOS always shows a minimal app menu; we remove custom menus below.
         webPreferences: {
             preload: path.resolve(__dirname, '../preload/preload.cjs'),
             nodeIntegration: false,
             contextIsolation: true,
             sandbox: false,
-            devTools: true, // allow manual open
-            webSecurity: false,
+            devTools: isDev,              // ✅ DevTools only in dev
         },
     });
 
-    // safety: if ready-to-show fires, ensure visible
+    // Remove any app menu (Win/Linux); macOS will keep a minimal system menu.
+    Menu.setApplicationMenu(null);
+
+    // In production, block DevTools openings from any source
+    if (!isDev) {
+        // Block keyboard shortcuts (F12, Ctrl+Shift+I, Cmd+Alt+I, etc.)
+        mainWindow.webContents.on('before-input-event', (event, input) => {
+            const isOpenDevtoolsCombo =
+                input.key === 'F12' ||
+                ((input.control || input.meta) && input.shift && input.key.toUpperCase() === 'I') ||
+                (process.platform === 'darwin' && input.meta && input.alt && input.key.toUpperCase() === 'I');
+            if (isOpenDevtoolsCombo) event.preventDefault();
+        });
+
+        // Block programmatic opens just in case
+        mainWindow.webContents.on('devtools-opened', () => {
+            mainWindow?.webContents.closeDevTools();
+        });
+
+        // Disable right-click “Inspect” in prod
+        mainWindow.webContents.on('context-menu', (e) => {
+            e.preventDefault();
+        });
+    }
+
+    // Make sure window is visible and focused
     mainWindow.once('ready-to-show', () => {
         if (!mainWindow?.isVisible()) mainWindow?.show();
         mainWindow?.focus();
     });
-
-    // fallback: force-show after 1s
     setTimeout(() => {
         if (mainWindow && !mainWindow.isVisible()) {
             mainWindow.show();
@@ -71,7 +100,7 @@ async function createWindow() {
         await mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
     }
 
-    // ⛔ Don’t auto-open DevTools unless explicitly requested
+    // Do NOT auto-open DevTools; allow manual only in dev via shortcuts/menu
     if (isDev && process.env.DEBUG_DEVTOOLS === '1') {
         mainWindow.webContents.openDevTools({ mode: 'detach' });
     }
@@ -82,6 +111,9 @@ async function createWindow() {
     });
 }
 
+/* -------------------------
+   App lifecycle
+-------------------------- */
 app.whenReady().then(async () => {
     await createWindow();
     app.on('activate', async () => {
@@ -94,7 +126,7 @@ app.on('window-all-closed', () => {
 });
 
 /* -------------------------
-   Settings (new + aliases)
+   IPC: Settings
 -------------------------- */
 ipcMain.handle('settings:get', async () => getSettings());
 ipcMain.handle('settings:save', async (_e, s) => saveSettings(s));
@@ -102,14 +134,14 @@ ipcMain.handle('dialog:pickFolder', async () => {
     const res = await dialog.showOpenDialog({ properties: ['openDirectory'] });
     return res.canceled || !res.filePaths.length ? '' : res.filePaths[0];
 });
-ipcMain.handle('settings:set', async (_e, s) => saveSettings(s)); // alias
-ipcMain.handle('settings:pick-folder', async () => {              // alias
+ipcMain.handle('settings:set', async (_e, s) => saveSettings(s));
+ipcMain.handle('settings:pick-folder', async () => {
     const res = await dialog.showOpenDialog({ properties: ['openDirectory'] });
     return res.canceled || !res.filePaths.length ? '' : res.filePaths[0];
 });
 
 /* -------------------------
-   Scan & Watch (new + alias)
+   IPC: Scan & Watch
 -------------------------- */
 ipcMain.handle('images:scan', async (_e, rootPath: string) => scanImages(rootPath));
 ipcMain.handle('images:watch:start', async (_e, rootPath: string) => {
@@ -122,10 +154,10 @@ ipcMain.handle('images:watch:start', async (_e, rootPath: string) => {
     );
 });
 ipcMain.handle('images:watch:stop', async () => stopImageWatcher());
-ipcMain.handle('scanner:scan', async (_e, rootPath: string) => scanImages(rootPath)); // alias
+ipcMain.handle('scanner:scan', async (_e, rootPath: string) => scanImages(rootPath));
 
 /* -------------------------
-   Metadata & Thumbnails
+   IPC: Metadata & Thumbnails
 -------------------------- */
 ipcMain.handle('image:metadata', async (_e, filePath: string) => getMetadataForFile(filePath));
 ipcMain.handle('image:thumbnail', async (_e, filePath: string, maxSize: number) => {
@@ -134,14 +166,14 @@ ipcMain.handle('image:thumbnail', async (_e, filePath: string, maxSize: number) 
 });
 
 /* -------------------------
-   Favorites
+   IPC: Favorites
 -------------------------- */
 ipcMain.handle('favorites:toggle', async (_e, filePath: string) => toggleFavorite(filePath));
 ipcMain.handle('favorites:is', async (_e, filePath: string) => isFavorite(filePath));
 ipcMain.handle('favorites:list', async () => getFavorites());
 
 /* -------------------------
-   File operations
+   IPC: File operations
 -------------------------- */
 ipcMain.handle('file:openInExplorer', async (_e, filePath: string) => {
     shell.showItemInFolder(filePath);

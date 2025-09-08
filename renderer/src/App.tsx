@@ -1,12 +1,16 @@
 import React from 'react';
 import { SettingsProvider } from '@/context/SettingsContext';
 import { ImagesProvider, useImages } from '@/context/ImagesContext';
+import { ThemeProvider } from '@/context/ThemeContext';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
 import ImageGrid from '@/components/ImageGrid';
 import AboutModal from '@/components/Modals/AboutModal';
 import SettingsModal from '@/components/Modals/SettingsModal';
 import ImageModal from '@/components/Modals/ImageModal';
+
+// ✅ use the large icon (ensure you have renderer/src/assets/icons/icon-256.png)
+import aboutLogo from '@/assets/icons/icon-256.png';
 
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: any }> {
     constructor(props: { children: React.ReactNode }) {
@@ -18,9 +22,9 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
     render() {
         if (this.state.error) {
             return (
-                <div style={{ padding: 24, color: '#fff', background: '#111', height: '100vh' }}>
-                    <h2 style={{ marginBottom: 12 }}>Renderer crashed</h2>
-                    <pre style={{ whiteSpace: 'pre-wrap' }}>
+                <div className="p-6 h-screen bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">
+                    <h2 className="mb-3 text-lg font-semibold">Renderer crashed</h2>
+                    <pre className="whitespace-pre-wrap text-sm">
             {String(this.state.error?.stack || this.state.error?.message || this.state.error)}
           </pre>
                 </div>
@@ -64,13 +68,20 @@ const ShellInner: React.FC = () => {
     }, []);
 
     return (
-        <div className="h-screen w-screen grid grid-cols-[260px_1fr] grid-rows-[56px_1fr]">
-            <Header className="col-span-2" onOpenAbout={() => setAboutOpen(true)} onOpenSettings={() => setSettingsOpen(true)} />
+        <div className="h-screen w-screen grid grid-cols-[280px_1fr] grid-rows-[56px_1fr] bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">
+            <div className="col-span-2">
+                <Header onOpenAbout={() => setAboutOpen(true)} onOpenSettings={() => setSettingsOpen(true)} />
+            </div>
+
             <Sidebar />
+
             <main className="row-start-2 col-start-2 overflow-auto p-4">
                 <ImageGrid onOpenImage={(p: string) => setImageOpen(p)} />
             </main>
-            <AboutModal open={aboutOpen} onClose={() => setAboutOpen(false)} />
+
+            {/* ✅ pass big logo to AboutModal */}
+            <AboutModal open={aboutOpen} onClose={() => setAboutOpen(false)} logoSrc={aboutLogo} />
+
             <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
             <ImageModal
                 open={!!imageOpen}
@@ -86,9 +97,11 @@ const ShellInner: React.FC = () => {
 const App: React.FC = () => (
     <ErrorBoundary>
         <SettingsProvider>
-            <ImagesProvider>
-                <ShellInner />
-            </ImagesProvider>
+            <ThemeProvider>
+                <ImagesProvider>
+                    <ShellInner />
+                </ImagesProvider>
+            </ThemeProvider>
         </SettingsProvider>
     </ErrorBoundary>
 );

@@ -3,6 +3,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { useSettings } from '@/context/SettingsContext';
 import { useImages } from '@/context/ImagesContext';
 import styles from './Header.module.css';
+import btn from '@/styles/Buttons.module.css';
 
 type Props = {
     onOpenSettings: () => void;
@@ -18,11 +19,10 @@ const Header: React.FC<Props> = ({ onOpenSettings, onOpenAbout, className }) => 
     return (
         <header
             className={[
-                // base
-                'sticky top-0 z-20 h-[56px] px-4 bg-gray-900 border-b border-gray-800',
-                // layout: flex so ml-auto works
+                'sticky top-0 z-20 h-[56px] px-4',
+                'bg-white dark:bg-gray-900',
+                'border-b border-gray-200 dark:border-gray-800',
                 'flex items-center',
-                // allow parent to extend placement (e.g., col-span-2)
                 className || '',
             ].join(' ')}
         >
@@ -32,14 +32,14 @@ const Header: React.FC<Props> = ({ onOpenSettings, onOpenAbout, className }) => 
                 <div className={styles.title}>Image Nexus</div>
             </div>
 
-            {/* Right: actions — pushed to far right */}
+            {/* Right: actions — aligned to window edge */}
             <div className="flex items-center gap-2 ml-auto whitespace-nowrap">
-                <button className={styles.btn} onClick={toggleTheme}>
+                <button className={btn.btnPrimary} onClick={toggleTheme}>
                     {settings?.theme === 'dark' ? 'Light' : 'Dark'}
                 </button>
-                <button className={styles.btn} onClick={rescan}>Activate</button>
-                <button className={styles.btn} onClick={onOpenSettings}>Settings</button>
-                <button className={styles.btn} onClick={onOpenAbout}>About</button>
+                <button className={btn.btnPrimary} onClick={rescan}>Activate</button>
+                <button className={btn.btnPrimary} onClick={onOpenSettings}>Settings</button>
+                <button className={btn.btnPrimary} onClick={onOpenAbout}>About</button>
             </div>
         </header>
     );

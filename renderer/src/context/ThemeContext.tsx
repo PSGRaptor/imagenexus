@@ -12,7 +12,7 @@ type ThemeCtx = {
 const Ctx = createContext<ThemeCtx | null>(null);
 
 function applyThemeClass(theme: Theme) {
-    const el = document.documentElement;
+    const el = document.documentElement; // <html>
     if (theme === 'dark') el.classList.add('dark');
     else el.classList.remove('dark');
 }
@@ -21,11 +21,13 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const { settings, setSettings } = useSettings();
     const [theme, setThemeState] = useState<Theme>('dark');
 
-    // Initialize from settings when they arrive
+    // Initialize from settings or system preference
     useEffect(() => {
-        if (!settings?.theme) return;
-        setThemeState(settings.theme);
-        applyThemeClass(settings.theme);
+        const initial =
+            (settings?.theme as Theme | undefined) ??
+            (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        setThemeState(initial);
+        applyThemeClass(initial);
     }, [settings?.theme]);
 
     const setTheme = (t: Theme) => {
@@ -41,12 +43,10 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 };
 
-// ✅ SAFE HOOK: returns a non-throwing fallback if provider isn't mounted yet
 export function useTheme(): ThemeCtx {
     const ctx = useContext(Ctx);
     if (ctx) return ctx;
 
-    // Fallback: keep UI usable, sync the <html> dark class, but don't persist
     let current: Theme = (document.documentElement.classList.contains('dark') ? 'dark' : 'light') as Theme;
     const setTheme = (t: Theme) => {
         current = t;

@@ -33,17 +33,17 @@ const ImageCard: React.FC<Props> = ({ item, onOpen }) => {
     return (
         <button
             type="button"
-            className="rounded overflow-hidden bg-gray-900 border border-gray-800 text-left focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600"
+            className="rounded overflow-hidden bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 text-left focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600"
             onClick={() => onOpen(item)}
             title={item.name}
         >
             {/* 3:4 aspect */}
-            <div style={{ aspectRatio: '3 / 4' }} className="w-full bg-gray-800">
+            <div style={{ aspectRatio: '3 / 4' }} className="w-full bg-gray-100 dark:bg-gray-800">
                 {src ? <img src={src} alt={item.name} className="w-full h-full object-cover" draggable={false} /> : null}
             </div>
             <div className="p-2">
                 <div className="text-sm truncate">{item.name}</div>
-                <div className="text-xs text-gray-400 truncate">{item.folder}</div>
+                <div className="text-xs text-gray-600 dark:text-gray-400 truncate">{item.folder}</div>
             </div>
         </button>
     );

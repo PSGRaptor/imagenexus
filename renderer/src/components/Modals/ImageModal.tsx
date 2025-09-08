@@ -1,4 +1,3 @@
-// FILE: renderer/src/components/Modals/ImageModal.tsx
 import React from 'react';
 import { ImageItem, ImageMetadata } from '@/context/ImagesContext';
 import { toFileUrl } from '@/lib/fileurl';
@@ -18,14 +17,14 @@ const Panel: React.FC<{
 }> = ({ title, defaultOpen = true, children }) => {
     const [isOpen, setIsOpen] = React.useState(defaultOpen);
     return (
-        <div className="border border-gray-800 rounded-lg overflow-hidden">
+        <div className="border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden">
             <button
                 type="button"
-                className="w-full text-left px-3 py-2 bg-gray-900 hover:bg-gray-800 flex items-center justify-between"
+                className="w-full text-left px-3 py-2 bg-gray-100 hover:bg-gray-50 dark:bg-gray-900 dark:hover:bg-gray-800 flex items-center justify-between"
                 onClick={() => setIsOpen((v) => !v)}
             >
                 <span className="font-medium">{title}</span>
-                <span className="text-gray-400">{isOpen ? '▾' : '▸'}</span>
+                <span className="text-gray-500 dark:text-gray-400">{isOpen ? '▾' : '▸'}</span>
             </button>
             {isOpen && <div className="p-3 text-sm">{children}</div>}
         </div>
@@ -92,10 +91,15 @@ const ImageModal: React.FC<Props> = ({ open = false, item, onClose, onNext, onPr
     };
 
     return (
-        <div className="fixed inset-0 bg-black/75 flex items-center justify-center z-50">
-            <div className="w-[92vw] h-[92vh] bg-gray-950 border border-gray-800 rounded-xl grid grid-cols-[1fr_420px] overflow-hidden">
-                {/* LEFT: full image */}
-                <div className="bg-black flex items-center justify-center p-3">
+        <div
+            className="fixed inset-0 bg-black/75 flex items-center justify-center z-50"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Image details"
+        >
+            <div className="w-[92vw] h-[92vh] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl grid grid-cols-[1fr_420px] overflow-hidden">
+                {/* LEFT: full image (fit, not cropped) */}
+                <div className="bg-gray-100 dark:bg-black flex items-center justify-center p-3">
                     {src ? (
                         <img
                             src={src}
@@ -104,39 +108,39 @@ const ImageModal: React.FC<Props> = ({ open = false, item, onClose, onNext, onPr
                             draggable={false}
                         />
                     ) : (
-                        <div className="text-gray-400">No image</div>
+                        <div className="text-gray-500 dark:text-gray-400">No image</div>
                     )}
                 </div>
 
                 {/* RIGHT: metadata & actions */}
-                <div className="bg-gray-950 p-3 space-y-3 overflow-auto">
+                <div className="bg-white dark:bg-gray-900 p-3 space-y-3 overflow-auto">
                     {/* Header row: filename + controls */}
                     <div className="flex items-center justify-between">
                         <div>
                             <div className="font-medium truncate max-w-[260px]" title={item?.name}>
                                 {item?.name}
                             </div>
-                            <div className="text-xs text-gray-400 truncate max-w-[260px]" title={item?.folder}>
+                            <div className="text-xs text-gray-600 dark:text-gray-400 truncate max-w-[260px]" title={item?.folder}>
                                 {item?.folder}
                             </div>
                         </div>
                         <div className="flex gap-2">
                             <button
-                                className="px-2 py-1 rounded bg-gray-800 border border-gray-700"
+                                className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"
                                 onClick={() => onPrev?.()}
                                 title="Previous (←)"
                             >
                                 ←
                             </button>
                             <button
-                                className="px-2 py-1 rounded bg-gray-800 border border-gray-700"
+                                className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"
                                 onClick={() => onNext?.()}
                                 title="Next (→)"
                             >
                                 →
                             </button>
                             <button
-                                className="px-2 py-1 rounded bg-gray-800 border border-gray-700"
+                                className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"
                                 onClick={() => onClose?.()}
                                 title="Close (Esc)"
                             >
@@ -148,7 +152,7 @@ const ImageModal: React.FC<Props> = ({ open = false, item, onClose, onNext, onPr
                     {/* Quick actions */}
                     <div className="flex flex-wrap gap-2">
                         <button
-                            className="px-2 py-1 rounded bg-gray-800 border border-gray-700"
+                            className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"
                             onClick={() =>
                                 copyText([prompt, negative && `Negative: ${negative}`].filter(Boolean).join('\n\n'))
                             }
@@ -157,21 +161,21 @@ const ImageModal: React.FC<Props> = ({ open = false, item, onClose, onNext, onPr
                             Copy Prompt
                         </button>
                         <button
-                            className="px-2 py-1 rounded bg-gray-800 border border-gray-700"
+                            className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"
                             onClick={() => copyText(JSON.stringify(meta ?? {}, null, 2))}
                             title="Copy All Metadata (JSON)"
                         >
                             Copy All
                         </button>
                         <button
-                            className="px-2 py-1 rounded bg-gray-800 border border-gray-700"
+                            className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"
                             onClick={() => (window as any).api?.openInExplorer?.(item?.path)}
                             title="Open in Explorer"
                         >
                             Show in Explorer
                         </button>
                         <button
-                            className="px-2 py-1 rounded bg-gray-800 border border-gray-700"
+                            className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"
                             onClick={() => (window as any).api?.copyPath?.(item?.path)}
                             title="Copy File Path"
                         >
@@ -182,13 +186,13 @@ const ImageModal: React.FC<Props> = ({ open = false, item, onClose, onNext, onPr
                     {/* Collapsible panels */}
                     <Panel title="Prompt" defaultOpen>
             <pre className="whitespace-pre-wrap text-sm">
-              {prompt || <span className="text-gray-500">—</span>}
+              {prompt || <span className="text-gray-500 dark:text-gray-400">—</span>}
             </pre>
                     </Panel>
 
                     <Panel title="Negative Prompt">
             <pre className="whitespace-pre-wrap text-sm">
-              {negative || <span className="text-gray-500">—</span>}
+              {negative || <span className="text-gray-500 dark:text-gray-400">—</span>}
             </pre>
                     </Panel>
 
@@ -196,9 +200,11 @@ const ImageModal: React.FC<Props> = ({ open = false, item, onClose, onNext, onPr
                         <table className="w-full text-sm">
                             <tbody>
                             {Object.entries(settings).map(([k, v]) => (
-                                <tr key={k} className="border-b border-gray-800 last:border-none">
-                                    <td className="py-1 pr-3 text-gray-400 align-top">{k}</td>
-                                    <td className="py-1 break-all">{v ?? <span className="text-gray-500">—</span>}</td>
+                                <tr key={k} className="border-b border-gray-200 dark:border-gray-800 last:border-none">
+                                    <td className="py-1 pr-3 text-gray-600 dark:text-gray-400 align-top">{k}</td>
+                                    <td className="py-1 break-all">
+                                        {v ?? <span className="text-gray-500 dark:text-gray-400">—</span>}
+                                    </td>
                                 </tr>
                             ))}
                             </tbody>
@@ -207,7 +213,7 @@ const ImageModal: React.FC<Props> = ({ open = false, item, onClose, onNext, onPr
 
                     <Panel title="Raw JSON">
             <pre className="whitespace-pre-wrap text-xs">
-              {meta?.raw ? JSON.stringify(meta.raw, null, 2) : <span className="text-gray-500">—</span>}
+              {meta?.raw ? JSON.stringify(meta.raw, null, 2) : <span className="text-gray-500 dark:text-gray-400">—</span>}
             </pre>
                     </Panel>
                 </div>

@@ -4,6 +4,7 @@ import { useSettings } from '@/context/SettingsContext';
 import { useImages } from '@/context/ImagesContext';
 import styles from './Header.module.css';
 import btn from '@/styles/Buttons.module.css';
+import appLogo from '@/assets/icons/icon-256.png';
 
 type Props = {
     onOpenSettings: () => void;
@@ -28,7 +29,11 @@ const Header: React.FC<Props> = ({ onOpenSettings, onOpenAbout, className }) => 
         >
             {/* Left: brand/title */}
             <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-blue-600" />
+                <img
+                    src={appLogo}
+                    alt="Image Nexus logo"
+                    className="w-8 h-8 rounded"
+                />
                 <div className={styles.title}>Image Nexus</div>
             </div>
 

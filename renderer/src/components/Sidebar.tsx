@@ -1,4 +1,5 @@
-import React from 'react';
+// START OF FILE: Sidebar.tsx
+import React, { useEffect } from 'react';
 import { useSettings } from '@/context/SettingsContext';
 import { useImages } from '@/context/ImagesContext';
 import btn from '@/styles/Buttons.module.css';
@@ -28,6 +29,17 @@ const Sidebar: React.FC = () => {
         setPathInput(chosen);
         try { await rescan(); } catch {}
     };
+
+    // Initialize thumbnail size slider and label from localStorage
+    useEffect(() => {
+        const saved = localStorage.getItem('imagenexus.thumbSize.v1') || '200px';
+        document.documentElement.style.setProperty('--thumb-size', saved);
+        const px = parseInt(saved, 10);
+        const input = document.getElementById('thumb-size') as HTMLInputElement | null;
+        const span  = document.getElementById('thumb-size-value');
+        if (input) input.value = String(px);
+        if (span)  span.textContent = saved;
+    }, []);
 
     return (
         <aside className="row-start-2 col-start-1 p-3 bg-gray-50 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800">
@@ -81,13 +93,36 @@ const Sidebar: React.FC = () => {
                     </label>
                 </div>
 
-                {/* Search */}
+                {/* Search (filename only) */}
                 <div>
                     <input
                         className="w-full px-2 py-1 rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700"
-                        placeholder="Filename / prompt search…"
+                        placeholder="Filename filter…"
                         value={filters.query}
                         onChange={e => setFilters({ query: e.target.value })}
+                    />
+                </div>
+
+                {/* Bottom controls: thumbnail size slider */}
+                <div className="border-t border-neutral-800 p-3">
+                    <label htmlFor="thumb-size" className="block text-xs text-neutral-300 mb-2">
+                        Thumbnail size: <span id="thumb-size-value" className="font-mono"></span>
+                    </label>
+                    <input
+                        id="thumb-size"
+                        type="range"
+                        min={60}
+                        max={512}
+                        step={2}
+                        className="w-full"
+                        onInput={(e) => {
+                            const px = String((e.target as HTMLInputElement).value);
+                            const v = `${px}px`;
+                            document.documentElement.style.setProperty('--thumb-size', v);
+                            localStorage.setItem('imagenexus.thumbSize.v1', v);
+                            const span = document.getElementById('thumb-size-value');
+                            if (span) span.textContent = v;
+                        }}
                     />
                 </div>
             </div>
@@ -96,3 +131,4 @@ const Sidebar: React.FC = () => {
 };
 
 export default Sidebar;
+// END OF FILE: Sidebar.tsx

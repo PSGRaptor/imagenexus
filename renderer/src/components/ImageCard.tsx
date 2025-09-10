@@ -1,52 +1,46 @@
+// START OF FILE: renderer/src/components/ImageCard.tsx
 import React from 'react';
-import { ImageItem } from '@/context/ImagesContext';
-import { useSettings } from '@/context/SettingsContext';
-import { toFileUrl } from '@/lib/fileurl';
+import type { ImageItem } from '@/context/ImagesContext';
 
-type Props = { item: ImageItem; onOpen: (it: ImageItem) => void };
+function toFileUrl(p?: string): string {
+    if (!p) return '';
+    if (/^(data:|blob:|https?:|atom:|app:|file:)/i.test(p)) return p;
+    let s = p.replace(/\\/g, '/');
+    if (/^[A-Za-z]:/.test(s)) s = '/' + s;
+    return encodeURI('file://' + s);
+}
 
-const ImageCard: React.FC<Props> = ({ item, onOpen }) => {
-    const { settings } = useSettings();
-    const [src, setSrc] = React.useState<string | null>(item.thumb ? toFileUrl(item.thumb) : null);
-
-    React.useEffect(() => {
-        let cancelled = false;
-
-        if (item.thumb) {
-            setSrc(toFileUrl(item.thumb));
-            return () => { cancelled = true; };
-        }
-
-        (async () => {
-            try {
-                const max = settings?.thumbnail?.maxSize ?? 512;
-                const thumbPath = await window.api.getThumbnail(item.path, max);
-                if (!cancelled) setSrc(toFileUrl(thumbPath));
-            } catch {
-                if (!cancelled) setSrc(null);
-            }
-        })();
-
-        return () => { cancelled = true; };
-    }, [item.path, item.thumb, settings?.thumbnail?.maxSize]);
+const ImageCard: React.FC<{ item: ImageItem; onOpen?: (item: ImageItem) => void }> = ({ item, onOpen }) => {
+    // Thumbnails now come back as data: URLs from main; if absent, fall back to file://
+    const src = item.thumb || toFileUrl(item.path);
 
     return (
         <button
-            type="button"
-            className="rounded overflow-hidden bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 text-left focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600"
-            onClick={() => onOpen(item)}
+            className="group block rounded-lg overflow-hidden border border-neutral-800 bg-neutral-900 hover:border-neutral-700 text-left"
+            onClick={() => onOpen?.(item)}
             title={item.name}
+            style={{ aspectRatio: '3 / 4' }}  // ✅ 3:4 tiles
         >
-            {/* 3:4 aspect */}
-            <div style={{ aspectRatio: '3 / 4' }} className="w-full bg-gray-100 dark:bg-gray-800">
-                {src ? <img src={src} alt={item.name} className="w-full h-full object-cover" draggable={false} /> : null}
-            </div>
-            <div className="p-2">
-                <div className="text-sm truncate">{item.name}</div>
-                <div className="text-xs text-gray-600 dark:text-gray-400 truncate">{item.folder}</div>
+            <img
+                src={src}
+                alt={item.name}
+                className="w-full h-full object-cover"
+                draggable={false}
+                loading="lazy"
+                decoding="async"
+                onError={(e) => {
+                    // Fallback to original file if the thumbnail data URL fails for any reason
+                    const el = e.currentTarget as HTMLImageElement;
+                    const fallback = toFileUrl(item.path);
+                    if (el.src !== fallback) el.src = fallback;
+                }}
+            />
+            <div className="text-xs text-neutral-300 p-2 truncate bg-neutral-950/80">
+                {item.name}
             </div>
         </button>
     );
 };
 
 export default ImageCard;
+// END OF FILE: renderer/src/components/ImageCard.tsx

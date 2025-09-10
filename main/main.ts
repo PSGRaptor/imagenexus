@@ -164,8 +164,36 @@ ipcMain.handle('scanner:scan', async (_e, rootPath: string) => scanImages(rootPa
 -------------------------- */
 ipcMain.handle('image:metadata', async (_e, filePath: string) => getMetadataForFile(filePath));
 ipcMain.handle('image:thumbnail', async (_e, filePath: string, maxSize: number) => {
+    // Your existing generator returns a thumbnail *file path*
     const thumbPath = await makeThumbnail(filePath, maxSize);
-    return thumbPath;
+
+    // Read the file and convert to a data URL (works in dev/prod without file:// issues)
+    const buf = await fse.readFile(thumbPath);
+    const ext = path.extname(thumbPath).toLowerCase();
+
+    // Pick a MIME type based on the thumbnail extension
+    const mime =
+        ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
+            ext === '.webp' ? 'image/webp' :
+                ext === '.gif'  ? 'image/gif'  :
+                    ext === '.bmp'  ? 'image/bmp'  :
+                        /* default */     'image/png';
+
+    return `data:${mime};base64,${buf.toString('base64')}`;
+});
+
+ipcMain.handle('image:readAsDataUrl', async (_e, filePath: string) => {
+    // Read the original file and return a data URL (works in dev/prod)
+    const buf = await fse.readFile(filePath);
+    const ext = path.extname(filePath).toLowerCase();
+    const mime =
+        ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
+            ext === '.webp' ? 'image/webp' :
+                ext === '.gif'  ? 'image/gif'  :
+                    ext === '.bmp'  ? 'image/bmp'  :
+                        /* default */     'image/png';
+
+    return `data:${mime};base64,${buf.toString('base64')}`;
 });
 
 /* -------------------------

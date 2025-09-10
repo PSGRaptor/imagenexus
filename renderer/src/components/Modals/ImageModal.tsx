@@ -1,3 +1,4 @@
+// START OF FILE: renderer/src/components/ImageModal.tsx
 import React from 'react';
 import { ImageItem, ImageMetadata } from '@/context/ImagesContext';
 import { toFileUrl } from '@/lib/fileurl';
@@ -24,15 +25,24 @@ const Panel: React.FC<{
                 onClick={() => setIsOpen((v) => !v)}
             >
                 <span className="font-medium">{title}</span>
-                <span className="text-gray-500 dark:text-gray-400">{isOpen ? '▾' : '▸'}</span>
+                <span className="text-gray-500 dark:text-gray-400">
+          {isOpen ? '▾' : '▸'}
+        </span>
             </button>
             {isOpen && <div className="p-3 text-sm">{children}</div>}
         </div>
     );
 };
 
-const ImageModal: React.FC<Props> = ({ open = false, item, onClose, onNext, onPrev }) => {
+const ImageModal: React.FC<Props> = ({
+                                         open = false,
+                                         item,
+                                         onClose,
+                                         onNext,
+                                         onPrev,
+                                     }) => {
     const [meta, setMeta] = React.useState<ImageMetadata | null>(null);
+    const [dataUrl, setDataUrl] = React.useState<string>(''); // <-- single-viewer image source
 
     // Load metadata when the selected item changes
     React.useEffect(() => {
@@ -54,6 +64,30 @@ const ImageModal: React.FC<Props> = ({ open = false, item, onClose, onNext, onPr
         };
     }, [item?.path]);
 
+    // Load full image as data URL for the single-image viewer (fixes file:// load issues)
+    React.useEffect(() => {
+        let alive = true;
+        setDataUrl('');
+        if (!open || !item?.path) return;
+
+        const api = (window as any).api;
+        if (typeof api?.getImageDataUrl === 'function') {
+            api
+                .getImageDataUrl(item.path)
+                .then((url: string) => {
+                    if (alive) setDataUrl(url || '');
+                })
+                .catch(() => {
+                    // Keep empty; <img> will try a file:// fallback below
+                    if (alive) setDataUrl('');
+                });
+        }
+
+        return () => {
+            alive = false;
+        };
+    }, [open, item?.path]);
+
     // Keyboard shortcuts: Esc to close, ← / → to navigate
     React.useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
@@ -68,7 +102,7 @@ const ImageModal: React.FC<Props> = ({ open = false, item, onClose, onNext, onPr
 
     if (!open) return null;
 
-    const src = toFileUrl(item?.path);
+    const src = dataUrl || toFileUrl(item?.path); // prefer data:, fall back to file:// if available
     const prompt = meta?.prompt ?? '';
     const negative = meta?.negative ?? '';
     const gen = meta?.generator ?? '';
@@ -106,6 +140,14 @@ const ImageModal: React.FC<Props> = ({ open = false, item, onClose, onNext, onPr
                             alt={item?.name || ''}
                             className="max-w-full max-h-[calc(92vh-24px)] object-contain"
                             draggable={false}
+                            onError={(e) => {
+                                // If data URL fails for any reason, fall back to file://
+                                const el = e.currentTarget as HTMLImageElement;
+                                const fallback = toFileUrl(item?.path);
+                                if (fallback && el.src !== fallback) {
+                                    el.src = fallback;
+                                }
+                            }}
                         />
                     ) : (
                         <div className="text-gray-500 dark:text-gray-400">No image</div>
@@ -120,7 +162,10 @@ const ImageModal: React.FC<Props> = ({ open = false, item, onClose, onNext, onPr
                             <div className="font-medium truncate max-w-[260px]" title={item?.name}>
                                 {item?.name}
                             </div>
-                            <div className="text-xs text-gray-600 dark:text-gray-400 truncate max-w-[260px]" title={item?.folder}>
+                            <div
+                                className="text-xs text-gray-600 dark:text-gray-400 truncate max-w-[260px]"
+                                title={item?.folder}
+                            >
                                 {item?.folder}
                             </div>
                         </div>
@@ -223,3 +268,4 @@ const ImageModal: React.FC<Props> = ({ open = false, item, onClose, onNext, onPr
 };
 
 export default ImageModal;
+// END OF FILE: renderer/src/components/ImageModal.tsx

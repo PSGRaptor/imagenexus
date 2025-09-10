@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld('api', {
     getMetadata: (filePath: string) => ipcRenderer.invoke('image:metadata', filePath),
     getThumbnail: (filePath: string, maxSize: number) =>
         ipcRenderer.invoke('image:thumbnail', filePath, maxSize),
+    getImageDataUrl: (filePath: string) =>
+        ipcRenderer.invoke('image:readAsDataUrl', filePath),
 
     // Favorites
     toggleFavorite: (filePath: string) => ipcRenderer.invoke('favorites:toggle', filePath),

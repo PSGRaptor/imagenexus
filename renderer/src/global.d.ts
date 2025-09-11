@@ -22,6 +22,8 @@ declare global {
             // Metadata & Thumbnails
             getMetadata: (filePath: string) => Promise<any>;
             getThumbnail: (filePath: string, maxSize: number) => Promise<string | undefined>;
+            /** Exposed by preload.ts; used by ImageModal for single-image viewer */
+            getImageDataUrl: (filePath: string) => Promise<string>;
 
             // Favorites
             toggleFavorite: (filePath: string) => Promise<boolean>;

@@ -11,6 +11,29 @@ type Props = {
     onPrev?: () => void;
 };
 
+// layout helpers (place near top of the file)
+const imxRightPaneStyle: React.CSSProperties = {
+    display: "flex",
+    flexDirection: "column",
+    minWidth: 0,
+    minHeight: 0,
+    borderLeft: "1px solid rgba(255,255,255,0.08)",
+    background: "var(--nx-right-bg, #13151b)",
+};
+const imxRightHeaderStyle: React.CSSProperties = {
+    position: "sticky",
+    top: 0,
+    zIndex: 5,
+    background: "var(--nx-right-bg, #13151b)",
+    boxShadow: "0 1px 0 rgba(255,255,255,0.06)",
+};
+const imxMetaScrollStyle: React.CSSProperties = {
+    flex: "1 1 auto",
+    overflowY: "auto",
+    minHeight: 0,
+    WebkitOverflowScrolling: "touch",
+};
+
 const Panel: React.FC<{
     title: string;
     defaultOpen?: boolean;
@@ -67,25 +90,31 @@ const ImageModal: React.FC<Props> = ({
     // Load full image as data URL for the single-image viewer (fixes file:// load issues)
     React.useEffect(() => {
         let alive = true;
-        setDataUrl('');
-        if (!open || !item?.path) return;
+        if (!open || !item?.path) {
+            setDataUrl('');
+            return;
+        }
+
+        const fileUrl = toFileUrl(item.path);
+        // Show something immediately
+        setDataUrl(fileUrl || '');
 
         const api = (window as any).api;
         if (typeof api?.getImageDataUrl === 'function') {
-            api
-                .getImageDataUrl(item.path)
+            api.getImageDataUrl(item.path)
                 .then((url: string) => {
-                    if (alive) setDataUrl(url || '');
+                    if (!alive) return;
+                    // If API returns nothing, keep the file:// fallback
+                    setDataUrl(url || fileUrl || '');
                 })
                 .catch(() => {
-                    // Keep empty; <img> will try a file:// fallback below
-                    if (alive) setDataUrl('');
+                    if (!alive) return;
+                    // Keep the file:// fallback
+                    setDataUrl(fileUrl || '');
                 });
         }
 
-        return () => {
-            alive = false;
-        };
+        return () => { alive = false; };
     }, [open, item?.path]);
 
     // Keyboard shortcuts: Esc to close, ← / → to navigate
@@ -131,7 +160,7 @@ const ImageModal: React.FC<Props> = ({
             aria-modal="true"
             aria-label="Image details"
         >
-            <div className="w-[92vw] h-[92vh] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl grid grid-cols-[1fr_420px] overflow-hidden">
+            <div className="w-[92vw] h-[92vh] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl grid grid-cols-[1fr_420px] overflow-hidden min-h-0">
                 {/* LEFT: full image (fit, not cropped) */}
                 <div className="bg-gray-100 dark:bg-black flex items-center justify-center p-3">
                     {src ? (
@@ -154,114 +183,120 @@ const ImageModal: React.FC<Props> = ({
                     )}
                 </div>
 
-                {/* RIGHT: metadata & actions */}
-                <div className="bg-white dark:bg-gray-900 p-3 space-y-3 overflow-auto">
-                    {/* Header row: filename + controls */}
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <div className="font-medium truncate max-w-[260px]" title={item?.name}>
-                                {item?.name}
+                {/* RIGHT PANE WRAPPER */}
+                <aside style={imxRightPaneStyle} className="min-h-0">
+                    {/* Header OUTSIDE the scroller (non-scrolling) */}
+                    <div style={imxRightHeaderStyle} className="bg-white dark:bg-gray-900 p-3">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <div className="font-medium truncate max-w-[260px]" title={item?.name}>
+                                    {item?.name}
+                                </div>
+                                <div
+                                    className="text-xs text-gray-600 dark:text-gray-400 truncate max-w-[260px]"
+                                    title={item?.folder}
+                                >
+                                    {item?.folder}
+                                </div>
                             </div>
-                            <div
-                                className="text-xs text-gray-600 dark:text-gray-400 truncate max-w-[260px]"
-                                title={item?.folder}
-                            >
-                                {item?.folder}
+                            <div className="flex gap-2">
+                                <button
+                                    className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"
+                                    onClick={() => onPrev?.()}
+                                    title="Previous (←)"
+                                >
+                                    ←
+                                </button>
+                                <button
+                                    className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"
+                                    onClick={() => onNext?.()}
+                                    title="Next (→)"
+                                >
+                                    →
+                                </button>
+                                <button
+                                    className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"
+                                    onClick={() => onClose?.()}
+                                    title="Close (Esc)"
+                                >
+                                    Close
+                                </button>
                             </div>
-                        </div>
-                        <div className="flex gap-2">
-                            <button
-                                className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"
-                                onClick={() => onPrev?.()}
-                                title="Previous (←)"
-                            >
-                                ←
-                            </button>
-                            <button
-                                className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"
-                                onClick={() => onNext?.()}
-                                title="Next (→)"
-                            >
-                                →
-                            </button>
-                            <button
-                                className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"
-                                onClick={() => onClose?.()}
-                                title="Close (Esc)"
-                            >
-                                Close
-                            </button>
                         </div>
                     </div>
 
-                    {/* Quick actions */}
-                    <div className="flex flex-wrap gap-2">
-                        <button
-                            className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"
-                            onClick={() =>
-                                copyText([prompt, negative && `Negative: ${negative}`].filter(Boolean).join('\n\n'))
-                            }
-                            title="Copy Prompt"
-                        >
-                            Copy Prompt
-                        </button>
-                        <button
-                            className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"
-                            onClick={() => copyText(JSON.stringify(meta ?? {}, null, 2))}
-                            title="Copy All Metadata (JSON)"
-                        >
-                            Copy All
-                        </button>
-                        <button
-                            className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"
-                            onClick={() => (window as any).api?.openInExplorer?.(item?.path)}
-                            title="Open in Explorer"
-                        >
-                            Show in Explorer
-                        </button>
-                        <button
-                            className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"
-                            onClick={() => (window as any).api?.copyPath?.(item?.path)}
-                            title="Copy File Path"
-                        >
-                            Copy Path
-                        </button>
+                    {/* Scrolling area (actions + panels) */}
+                    <div style={imxMetaScrollStyle} className="bg-white dark:bg-gray-900 p-3 space-y-3">
+                        {/* Quick actions */}
+                        <div className="flex flex-wrap gap-2">
+                            <button
+                                className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"
+                                onClick={() =>
+                                    copyText([prompt, negative && `Negative: ${negative}`].filter(Boolean).join('\n\n'))
+                                }
+                                title="Copy Prompt"
+                            >
+                                Copy Prompt
+                            </button>
+                            <button
+                                className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"
+                                onClick={() => copyText(JSON.stringify(meta ?? {}, null, 2))}
+                                title="Copy All Metadata (JSON)"
+                            >
+                                Copy All
+                            </button>
+                            <button
+                                className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"
+                                onClick={() => (window as any).api?.openInExplorer?.(item?.path)}
+                                title="Open in Explorer"
+                            >
+                                Show in Explorer
+                            </button>
+                            <button
+                                className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"
+                                onClick={() => (window as any).api?.copyPath?.(item?.path)}
+                                title="Copy File Path"
+                            >
+                                Copy Path
+                            </button>
+                        </div>
+
+                        {/* Collapsible panels */}
+                        <Panel title="Prompt" defaultOpen>
+                          <pre className="whitespace-pre-wrap text-sm">
+                            {prompt || <span className="text-gray-500 dark:text-gray-400">—</span>}
+                          </pre>
+                        </Panel>
+
+                        <Panel title="Negative Prompt">
+                            <pre className="whitespace-pre-wrap text-sm">
+                            {negative || <span className="text-gray-500 dark:text-gray-400">—</span>}
+                            </pre>
+                        </Panel>
+
+                        <Panel title="Generation Settings">
+                            <table className="w-full text-sm">
+                                <tbody>
+                                {Object.entries(settings).map(([k, v]) => (
+                                    <tr key={k} className="border-b border-gray-200 dark:border-gray-800 last:border-none">
+                                        <td className="py-1 pr-3 text-gray-600 dark:text-gray-400 align-top">{k}</td>
+                                        <td className="py-1 break-all">
+                                            {v ?? <span className="text-gray-500 dark:text-gray-400">—</span>}
+                                        </td>
+                                    </tr>
+                                ))}
+                                </tbody>
+                            </table>
+                        </Panel>
+
+                        <Panel title="Raw JSON">
+                            <pre className="whitespace-pre-wrap text-xs">
+                                {meta?.raw ? JSON.stringify(meta.raw, null, 2) : <span className="text-gray-500 dark:text-gray-400">—</span>}
+                            </pre>
+                        </Panel>
                     </div>
+                </aside>
 
-                    {/* Collapsible panels */}
-                    <Panel title="Prompt" defaultOpen>
-            <pre className="whitespace-pre-wrap text-sm">
-              {prompt || <span className="text-gray-500 dark:text-gray-400">—</span>}
-            </pre>
-                    </Panel>
-
-                    <Panel title="Negative Prompt">
-            <pre className="whitespace-pre-wrap text-sm">
-              {negative || <span className="text-gray-500 dark:text-gray-400">—</span>}
-            </pre>
-                    </Panel>
-
-                    <Panel title="Generation Settings">
-                        <table className="w-full text-sm">
-                            <tbody>
-                            {Object.entries(settings).map(([k, v]) => (
-                                <tr key={k} className="border-b border-gray-200 dark:border-gray-800 last:border-none">
-                                    <td className="py-1 pr-3 text-gray-600 dark:text-gray-400 align-top">{k}</td>
-                                    <td className="py-1 break-all">
-                                        {v ?? <span className="text-gray-500 dark:text-gray-400">—</span>}
-                                    </td>
-                                </tr>
-                            ))}
-                            </tbody>
-                        </table>
-                    </Panel>
-
-                    <Panel title="Raw JSON">
-            <pre className="whitespace-pre-wrap text-xs">
-              {meta?.raw ? JSON.stringify(meta.raw, null, 2) : <span className="text-gray-500 dark:text-gray-400">—</span>}
-            </pre>
-                    </Panel>
-                </div>
             </div>
         </div>
     );

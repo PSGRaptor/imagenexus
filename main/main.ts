@@ -240,3 +240,19 @@ ipcMain.handle('file:move', async (_e, filePaths: string[], targetDir: string) =
     }
     return true;
 });
+
+// --- IPC: move file to OS trash (Recycle Bin) ---
+ipcMain.handle('fs:delete', async (_evt, filePath: string) => {
+    if (typeof filePath !== 'string' || !filePath.trim()) {
+        throw new Error('Invalid path');
+    }
+
+    const resolved = path.resolve(filePath);
+    // Use fs-extra's promise-based stat (NOT node:fs)
+    const stat = await fse.stat(resolved);
+    if (!stat.isFile()) throw new Error('Refusing to delete non-file');
+
+    // Safer than unlink: moves to Recycle Bin on Windows (Trash on macOS/Linux)
+    await shell.trashItem(resolved);
+    return true;
+});

@@ -45,4 +45,13 @@ contextBridge.exposeInMainWorld('api', {
 
     // Utility
     shellOpenExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
+
+    deleteFile: async (path: string) => {
+        try {
+            const ok = await ipcRenderer.invoke('fs:delete', path);
+            return { ok: !!ok };
+        } catch (e: any) {
+            return { ok: false, error: e?.message || String(e) };
+        }
+    },
 });

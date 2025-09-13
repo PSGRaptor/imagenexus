@@ -4,6 +4,10 @@ import zlib from 'zlib';
 import ExifReader from 'exifreader';
 import fse from 'fs-extra';
 
+// NEW: writers for embedding metadata
+import { writePngMetadata } from './parsers/pngText';
+import { writeJpegXmpMetadata } from './parsers/exifXmp';
+
 // ───────────────────────────────────────────────────────────────
 // Optional DOMParser polyfill for Node/Electron
 // ───────────────────────────────────────────────────────────────
@@ -142,7 +146,7 @@ function parseA1111Parameters(params: string): { positive?: string; negative?: s
     if (negIdx >= 0) {
         positive = joined.slice(0, negIdx).trim();
         const afterNeg = joined.slice(negIdx + 'Negative prompt:'.length);
-        const idxSteps = afterNeg.search(/\b(Steps|Sampler|CFG|Seed|Size|Model|Model hash)\b/i);
+        const idxSteps = afterNeg.search(/\b(Steps|Sampler|CFG|Seed|Size|Model|Model hash|Checkpoint)\b/i);
         if (idxSteps >= 0) {
             negative = afterNeg.slice(0, idxSteps).trim();
             tail = afterNeg.slice(idxSteps).trim();
@@ -344,7 +348,15 @@ function mapToImageMetadata(tool: string, positive?: string, negative?: string, 
     const sampler = get('Sampler') || get('Sampler name') || get('scheduler');
     const seed = get('Seed') || get('seed');
     const size = get('Size') || get('Resolution') || get('Dims');
-    const model = get('Model') || get('Model hash') || get('Model name') || get('model_name');
+    const model =
+        get('Model') || get('Model hash') || get('Model name') || get('model_name') ||
+        get('sd_model_checkpoint') || get('checkpoint') || get('ckpt') || get('ckpt_name');
+
+    if (model) {
+        // Prefer basename if a path is present; keep extension if it’s a known checkpoint file
+        const cleaned = String(model).trim().split(/[\\/]/).pop()!;
+        meta.model = cleaned;
+    }
 
     if (steps) meta.steps = Number(steps);
     if (cfg) meta.cfg = Number(cfg);
@@ -354,7 +366,6 @@ function mapToImageMetadata(tool: string, positive?: string, negative?: string, 
         const m = size?.match?.(/(\d+)\s*[xX]\s*(\d+)/);
         if (m) meta.size = `${m[1]}x${m[2]}`;
     }
-    if (model) meta.model = model;
 
     return meta;
 }
@@ -801,7 +812,7 @@ async function readSidecar(basePath: string): Promise<Partial<ImageMetadata> | n
 }
 
 // ───────────────────────────────────────────────────────────────
-// PUBLIC
+// PUBLIC — Reader
 // ───────────────────────────────────────────────────────────────
 export async function getMetadataForFile(filePath: string): Promise<ImageMetadata> {
     try {
@@ -821,4 +832,74 @@ export async function getMetadataForFile(filePath: string): Promise<ImageMetadat
     } catch {
         return { raw: { error: 'Failed to read metadata' } } as ImageMetadata;
     }
+}
+
+// ───────────────────────────────────────────────────────────────
+// PUBLIC — Writer (Atomic)  ✅ NEW
+// ───────────────────────────────────────────────────────────────
+export async function setMetadataForFile(
+    filePath: string,
+    patch: Partial<ImageMetadata>
+): Promise<ImageMetadata> {
+    const ext = path.extname(filePath).toLowerCase();
+    const buf = await fs.promises.readFile(filePath);
+
+    // Merge incoming patch with current parsed metadata to keep fields consistent
+    const current = await getMetadataForFile(filePath);
+    const merged: ImageMetadata = {
+        ...current,
+        ...Object.fromEntries(
+            Object.entries(patch).filter(([_, v]) => v !== undefined && v !== null)
+        ),
+    };
+
+    // Atomic write to temp file in same directory
+    const dir = path.dirname(filePath);
+    const base = path.basename(filePath);
+    const tmp = path.join(dir, `.~${base}.writing`);
+
+    try {
+        if (ext === '.png' && isPNG(buf)) {
+            const out = await writePngMetadata(buf, merged);
+            await fs.promises.writeFile(tmp, out);
+            await fse.move(tmp, filePath, { overwrite: true });
+        } else if (ext === '.jpg' || ext === '.jpeg') {
+            const out = await writeJpegXmpMetadata(buf, merged);
+            await fs.promises.writeFile(tmp, out);
+            await fse.move(tmp, filePath, { overwrite: true });
+        } else {
+            // Unsupported inline format (e.g., webp) — write sidecar as safe fallback
+            await writeSidecarForFile(filePath, merged);
+        }
+    } finally {
+        // Best-effort cleanup if tmp remains
+        if (await fse.pathExists(tmp)) {
+            try { await fse.remove(tmp); } catch {}
+        }
+    }
+
+    // Re-read to return normalized, embedded metadata
+    return await getMetadataForFile(filePath);
+}
+
+// ───────────────────────────────────────────────────────────────
+// Internals — simple sidecar writer used for unsupported formats
+// ───────────────────────────────────────────────────────────────
+async function writeSidecarForFile(filePath: string, meta: ImageMetadata) {
+    const dir = path.dirname(filePath);
+    const base = path.basename(filePath, path.extname(filePath));
+    const jsonPath = path.join(dir, `${base}.json`);
+
+    const out = {
+        prompt: meta.prompt || '',
+        negative: meta.negative || '',
+        steps: meta.steps ?? null,
+        cfg_scale: meta.cfg ?? null,
+        seed: meta.seed ?? null,
+        size: meta.size || null,
+        model: meta.model ? { name: meta.model } : null,
+        generator: meta.generator ?? null,
+    };
+
+    await fse.writeJSON(jsonPath, out, { spaces: 2 });
 }

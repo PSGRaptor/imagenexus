@@ -5,13 +5,31 @@ import fse from 'fs-extra';
 import { debounce } from 'lodash';
 import { createImageWatcher, stopImageWatcher } from './watcher';
 import { scanImages } from './scanner';
-import { getMetadataForFile } from './metadata';
+import { getMetadataForFile, setMetadataForFile } from './metadata';
 import { ensureSettings, getSettings, saveSettings } from './settings';
 import { makeThumbnail } from './thumbnails';
 import { getFavorites, isFavorite, toggleFavorite } from './favorites';
 
+
 let mainWindow: BrowserWindow | null = null;
 const isDev = !app.isPackaged;
+
+const localAppData = app.getPath('appData')        // On Windows this is %APPDATA%
+    .replace(/\\Roaming\\?$/i, '\\Local');           // move to LocalAppData for caches
+
+const userDataDir = path.join(localAppData, 'Image Nexus Dev'); // dev-specific
+const cacheDir    = path.join(userDataDir, 'Cache');
+
+try {
+    fs.mkdirSync(cacheDir, { recursive: true });
+} catch { /* ignore */ }
+
+app.setPath('userData', userDataDir);              // where Chromium will create GPUCache, etc.
+app.setPath('cache', cacheDir);                    // Electron cache path
+app.commandLine.appendSwitch('disk-cache-dir', cacheDir);
+
+// Optional: quiet the GPU shader cache during dev (you can remove in prod if desired)
+app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
 
 /* -------------------------
    Helpers for renderer load
@@ -162,7 +180,7 @@ ipcMain.handle('scanner:scan', async (_e, rootPath: string) => scanImages(rootPa
 /* -------------------------
    IPC: Metadata & Thumbnails
 -------------------------- */
-ipcMain.handle('image:metadata', async (_e, filePath: string) => getMetadataForFile(filePath));
+
 ipcMain.handle('image:thumbnail', async (_e, filePath: string, maxSize: number) => {
     // Your existing generator returns a thumbnail *file path*
     const thumbPath = await makeThumbnail(filePath, maxSize);
@@ -255,4 +273,18 @@ ipcMain.handle('fs:delete', async (_evt, filePath: string) => {
     // Safer than unlink: moves to Recycle Bin on Windows (Trash on macOS/Linux)
     await shell.trashItem(resolved);
     return true;
+});
+
+ipcMain.handle('image:metadata', async (_e, filePath: string) => {
+    return await getMetadataForFile(filePath);
+});
+
+ipcMain.handle('image:metadata:set', async (_e, filePath: string, patch: Record<string, unknown>) => {
+    // Only accept whitelisted keys to avoid accidental writes
+    const safePatch: any = {};
+    const allow = new Set(['prompt','negative','model','sampler','steps','cfg','seed','size','generator']);
+    for (const [k, v] of Object.entries(patch || {})) {
+        if (allow.has(k)) safePatch[k] = v;
+    }
+    return await setMetadataForFile(filePath, safePatch);
 });

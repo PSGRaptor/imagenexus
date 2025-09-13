@@ -1,4 +1,3 @@
-// Safe, explicit IPC bridge used by the renderer.
 // FILE: main/preload.ts
 import { contextBridge, ipcRenderer } from 'electron';
 
@@ -6,9 +5,10 @@ contextBridge.exposeInMainWorld('api', {
     // Settings
     getSettings: () => ipcRenderer.invoke('settings:get'),
     saveSettings: (s: unknown) => ipcRenderer.invoke('settings:save', s),
-    setSettings: (s: unknown) => ipcRenderer.invoke('settings:save', s), // alias for older renderer
+    setSettings: (s: unknown) => ipcRenderer.invoke('settings:save', s), // alias
+
+    // Folders
     pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
-    // Legacy aliases the renderer might still use
     pickFolderLegacy: () => ipcRenderer.invoke('settings:pick-folder'),
 
     // Scan & Watch
@@ -24,6 +24,10 @@ contextBridge.exposeInMainWorld('api', {
 
     // Metadata & Thumbnails
     getMetadata: (filePath: string) => ipcRenderer.invoke('image:metadata', filePath),
+    // NEW: write metadata back to the image (atomic)
+    setMetadata: (filePath: string, patch: Record<string, unknown>) =>
+        ipcRenderer.invoke('image:metadata:set', filePath, patch),
+
     getThumbnail: (filePath: string, maxSize: number) =>
         ipcRenderer.invoke('image:thumbnail', filePath, maxSize),
     getImageDataUrl: (filePath: string) =>

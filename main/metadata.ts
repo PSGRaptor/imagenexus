@@ -14,7 +14,6 @@ import { writeJpegXmpMetadata } from './parsers/exifXmp';
 (() => {
     try {
         if (typeof (global as any).DOMParser === 'undefined') {
-            // optional; if not installed we fall back to our regex XMP scraper
             // eslint-disable-next-line @typescript-eslint/no-var-requires
             const { DOMParser } = require('@xmldom/xmldom');
             (global as any).DOMParser = DOMParser;
@@ -39,6 +38,12 @@ export type ImageMetadata = {
 };
 
 type SDSettings = Record<string, string | number | boolean>;
+
+const looksLikeXmpPacket = (s?: string | null): boolean => {
+    if (!s) return false;
+    const t = s.trim();
+    return /<x:xmpmeta[\s>]/i.test(t) || t.includes('http://ns.adobe.com/xap/1.0/');
+};
 
 const cleanText = (s?: string): string | undefined => {
     if (!s) return s;
@@ -198,41 +203,60 @@ const looksUtf16le = (buf: Buffer): boolean => {
 
 function toStringFromExifValue(v: any): string | null {
     if (v == null) return null;
-    if (typeof v === 'string') return cleanText(v) || null;
 
+    // simple string
+    if (typeof v === 'string') {
+        const out = cleanText(v) || null;
+        return looksLikeXmpPacket(out) ? null : out;
+    }
+
+    // exifreader common shape { description, value }
     if (typeof v === 'object' && ('description' in v || 'value' in v)) {
         if (typeof (v as any).description === 'string') {
             const d = cleanText((v as any).description);
-            if (d) return d;
+            if (d && !looksLikeXmpPacket(d)) return d;
         }
         return toStringFromExifValue((v as any).value);
     }
+
+    // array -> join child strings
     if (Array.isArray(v)) {
         const parts: string[] = [];
         for (const el of v) {
             const s = toStringFromExifValue(el);
             if (s) parts.push(s);
         }
-        if (parts.length) return cleanText(parts.join('\n')) || null;
+        const joined = parts.length ? (cleanText(parts.join('\n')) || null) : null;
+        return looksLikeXmpPacket(joined) ? null : joined;
     }
+
+    // buffers -> decode as UTF-16LE if likely, else UTF-8
     if (v instanceof Uint8Array || Buffer.isBuffer(v)) {
         const b = Buffer.from(v as Uint8Array);
         if (looksUtf16le(b)) {
             const t = b.toString('utf16le').replace(/\u0000+/g, '').trim();
-            if (t) return cleanText(t) || null;
+            const out = t ? (cleanText(t) || null) : null;
+            return looksLikeXmpPacket(out) ? null : out;
         }
         const t = b.toString('utf8').replace(/\u0000/g, '').trim();
-        if (t) return cleanText(t) || null;
+        const out = t ? (cleanText(t) || null) : null;
+        return looksLikeXmpPacket(out) ? null : out;
     }
+
+    // numbers / booleans
     if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+
+    // generic object -> recurse values and join
     if (typeof v === 'object') {
         const parts: string[] = [];
         for (const child of Object.values(v)) {
             const s = toStringFromExifValue(child);
             if (s) parts.push(s);
         }
-        if (parts.length) return cleanText(parts.join('\n')) || null;
+        const joined = parts.length ? (cleanText(parts.join('\n')) || null) : null;
+        return looksLikeXmpPacket(joined) ? null : joined;
     }
+
     return null;
 }
 
@@ -353,7 +377,6 @@ function mapToImageMetadata(tool: string, positive?: string, negative?: string, 
         get('sd_model_checkpoint') || get('checkpoint') || get('ckpt') || get('ckpt_name');
 
     if (model) {
-        // Prefer basename if a path is present; keep extension if it’s a known checkpoint file
         const cleaned = String(model).trim().split(/[\\/]/).pop()!;
         meta.model = cleaned;
     }
@@ -539,6 +562,84 @@ function liftFromComfyGraph(graph: any): ImageMetadata | null {
     return mapToImageMetadata('ComfyUI', cleanText(positive) || '', cleanText(negative) || '', settings, { comfy_graph: graph });
 }
 
+/** Pull <sdx:*>{value}</sdx:*> fields out of the XMP block */
+function extractSdxFromXmp(xml: string): Partial<ImageMetadata> | null {
+    const out: Partial<ImageMetadata> = {};
+    const get = (tag: string) => {
+        const rx = new RegExp(`<sdx:${tag}[^>]*>([\\s\\S]*?)</sdx:${tag}>`, 'i');
+        const m = xml.match(rx);
+        return m ? cleanText(m[1]) : undefined;
+    };
+
+    const steps = get('steps');
+    const cfg   = get('cfg') ?? get('cfg_scale');
+    const seed  = get('seed');
+    const model = get('model') ?? get('ckpt') ?? get('checkpoint');
+    const sampler = get('sampler') ?? get('sampler_name') ?? get('scheduler');
+    const size  = get('size');
+    const generator = get('generator');
+    const negative  = get('negative'); // ← NEW
+
+    if (steps) out.steps = Number(steps);
+    if (cfg)   out.cfg = Number(cfg);
+    if (seed)  out.seed = seed;
+    if (sampler) out.sampler = sampler;
+    if (size) {
+        const m = size.match(/(\d+)\s*[xX]\s*(\d+)/);
+        if (m) out.size = `${m[1]}x${m[2]}`;
+    }
+    if (model) out.model = String(model).trim().split(/[\\/]/).pop();
+    if (generator) out.generator = generator;
+    if (negative) out.negative = negative; // ← NEW
+
+    return Object.keys(out).length ? out : null;
+}
+
+
+/** Split dc:description into prompt + trailing CSV-ish "Key: Val" tokens */
+function parseDescriptionWithKv(desc: string): { prompt?: string; settings?: Record<string, any> } | null {
+    if (!desc) return null;
+    const t = desc.replace(/\r/g, '').trim();
+    const firstKv = t.match(/\b(Seed|Steps|CFG(?:\s*Scale)?|Model|Sampler|Size)\s*:/i);
+    if (!firstKv || firstKv.index == null) return null;
+
+    const prompt = cleanText(t.slice(0, firstKv.index)) || '';
+    const tail = t.slice(firstKv.index);
+
+    // tokenize by commas (ignore commas inside parentheses)
+    const parts: string[] = [];
+    let buf = '';
+    let depth = 0;
+    for (const ch of tail) {
+        if (ch === '(') depth++;
+        if (ch === ')') depth = Math.max(0, depth - 1);
+        if (ch === ',' && depth === 0) {
+            if (buf.trim()) parts.push(buf.trim());
+            buf = '';
+        } else {
+            buf += ch;
+        }
+    }
+    if (buf.trim()) parts.push(buf.trim());
+
+    const settings: Record<string, any> = {};
+    for (const p of parts) {
+        const m = p.match(/^([A-Za-z _]+)\s*:\s*(.*)$/);
+        if (!m) continue;
+        const key = m[1].trim().toLowerCase();
+        const val = m[2].trim();
+        if (val === '') continue;
+        if (key === 'steps') settings['Steps'] = Number(val);
+        else if (key === 'cfg' || key === 'cfg scale' || key === 'cfg_scale') settings['CFG scale'] = Number(val);
+        else if (key === 'seed') settings['Seed'] = val;
+        else if (key === 'model' || key === 'checkpoint' || key === 'ckpt') settings['Model'] = val;
+        else if (key === 'sampler' || key === 'sampler name' || key === 'scheduler') settings['Sampler'] = val;
+        else if (key === 'size' || key === 'resolution') settings['Size'] = val;
+    }
+
+    return { prompt, settings };
+}
+
 // ───────────────────────────────────────────────────────────────
 // Main SD metadata reader
 // ───────────────────────────────────────────────────────────────
@@ -550,6 +651,34 @@ async function readSdMetadata(filePath: string): Promise<ImageMetadata> {
     if (isPNG(buf)) {
         const txt = extractPngTextBlocks(buf);
         raw.pngText = txt;
+
+        // Prefer our own structured JSON that the writer emits
+        const sdMetaJson = txt['sd-metadata']?.[0];
+        if (sdMetaJson) {
+            const j = tryParseJSON(sdMetaJson);
+            if (j) {
+                const settings: SDSettings = {};
+                if (j.steps != null) settings['Steps'] = j.steps;
+                if (j.cfg   != null) settings['CFG scale'] = j.cfg;
+                if (j.seed  != null) settings['Seed'] = j.seed;
+                if (typeof j.size === 'string') settings['Size'] = j.size;
+                if (typeof j.model === 'string') settings['Model'] = j.model;
+                if (typeof j.sampler === 'string') settings['Sampler'] = j.sampler;
+
+                const tool = typeof j.generator === 'string' ? j.generator : 'Unknown'; // ← use generator as tool
+                const meta = mapToImageMetadata(
+                    tool,
+                    typeof j.prompt === 'string' ? j.prompt : undefined,
+                    typeof j.negative === 'string' ? j.negative : undefined,
+                    settings,
+                    { txt, sd_metadata: j }
+                );
+
+                if (typeof j.generator === 'string') meta.generator = j.generator; // ← ensure saved
+
+                return meta;
+            }
+        }
 
         // InvokeAI explicit JSON
         const invokeMeta = txt['invokeai_metadata']?.[0];
@@ -572,7 +701,7 @@ async function readSdMetadata(filePath: string): Promise<ImageMetadata> {
         }
 
         // ComfyUI: workflow graph and/or prompt map
-        const comfyWorkflow = txt['workflow']?.[0] || txt['ComfyUI']?.[0] || txt['sd-metadata']?.[0];
+        const comfyWorkflow = txt['workflow']?.[0] || txt['ComfyUI']?.[0];
         const comfyPromptMap = txt['prompt']?.[0]; // some exporters use this key
 
         // Try prompt map first (cleanest)
@@ -616,10 +745,20 @@ async function readSdMetadata(filePath: string): Promise<ImageMetadata> {
                     // generic mapping
                     const settings: SDSettings = {};
                     if ((j as any).steps != null) settings['Steps'] = (j as any).steps;
+
+// accept either cfg_scale OR cfg
                     if ((j as any).cfg_scale != null) settings['CFG scale'] = (j as any).cfg_scale;
+                    else if ((j as any).cfg != null) settings['CFG scale'] = (j as any).cfg;
+
                     if ((j as any).seed != null) settings['Seed'] = (j as any).seed;
                     if ((j as any).width && (j as any).height) settings['Size'] = `${(j as any).width}x${(j as any).height}`;
+
+// accept model as nested or plain string
                     if ((j as any).model?.name) settings['Model'] = (j as any).model.name;
+                    else if (typeof (j as any).model === 'string') settings['Model'] = (j as any).model;
+
+// accept sampler as plain string
+                    if (typeof (j as any).sampler === 'string') settings['Sampler'] = (j as any).sampler;
                     return mapToImageMetadata(
                         (j as any).workflow ? 'ComfyUI' : 'Unknown',
                         (j as any).prompt || (j as any).positive,
@@ -634,7 +773,7 @@ async function readSdMetadata(filePath: string): Promise<ImageMetadata> {
         return { generator: 'Unknown', raw };
     }
 
-    // ── JPEG / WEBP route — two-pass EXIF (XMP only if DOMParser available)
+    // ── JPEG / (and other) route — EXIF + whole-file scans
     let tags: Record<string, any> = {};
     try { tags = ExifReader.load(buf) as any; } catch {}
     try {
@@ -653,7 +792,7 @@ async function readSdMetadata(filePath: string): Promise<ImageMetadata> {
     const com = readJpegComments(buf);
     const exifStrings = collectExifStrings(tags);
 
-    // Raw XMP scrape (fallback)
+    // Raw XMP scrape (fallback for description text)
     const xmpStrings = (() => {
         const s = buf.toString('utf8');
         const m = s.match(/<x:xmpmeta[\s\S]*?<\/x:xmpmeta>/i);
@@ -682,6 +821,58 @@ async function readSdMetadata(filePath: string): Promise<ImageMetadata> {
         return Array.from(new Set(found.map(x => cleanText(x) || '').filter(Boolean)));
     })();
 
+    // Try to lift structured sdx:* tags directly from the XMP packet
+    let xmpRawXml: string | null = null;
+    {
+        const s = buf.toString('utf8');
+        const m = s.match(/<x:xmpmeta[\s\S]*?<\/x:xmpmeta>/i);
+        if (m) xmpRawXml = m[0];
+    }
+    if (xmpRawXml) {
+        const sdx = extractSdxFromXmp(xmpRawXml);
+        if (sdx) {
+            // Prefer dc:description as the positive prompt; parse K/V tail if any
+            const descText = xmpStrings[0] || '';
+            const kvParsed = parseDescriptionWithKv(descText || '');
+            const pos = kvParsed?.prompt || descText || '';
+
+            const meta = mapToImageMetadata(
+                'Unknown',
+                pos,
+                sdx.negative,                                  // ← pass negative from sdx
+                {
+                    ...(kvParsed?.settings || {}),
+                    ...(sdx.steps != null ? { Steps: sdx.steps } : {}),
+                    ...(sdx.cfg   != null ? { 'CFG scale': sdx.cfg } : {}),
+                    ...(sdx.seed  != null ? { Seed: sdx.seed } : {}),
+                    ...(sdx.sampler ? { Sampler: sdx.sampler } : {}),
+                    ...(sdx.size  ? { Size: sdx.size } : {}),
+                    ...(sdx.model ? { Model: sdx.model } : {}),
+                },
+                { exif: rawExif, xmp: true }
+            );
+
+            // Preserve generator from sdx
+            if (sdx.generator) meta.generator = sdx.generator;   // ← NEW
+
+            return meta;
+        }
+
+        // If no sdx:* but description contains trailing K/V, lift them
+        if (xmpStrings.length) {
+            const kvParsed = parseDescriptionWithKv(xmpStrings[0]);
+            if (kvParsed?.settings) {
+                return mapToImageMetadata(
+                    'Unknown',
+                    kvParsed.prompt || xmpStrings[0],
+                    undefined,
+                    kvParsed.settings,
+                    { exif: rawExif, xmp: true }
+                );
+            }
+        }
+    }
+
     // Whole-file scans
     const fileUtf8 = buf.toString('utf8');
     const fileUtf16 = (() => { try { return buf.toString('utf16le'); } catch { return ''; } })();
@@ -705,7 +896,7 @@ async function readSdMetadata(filePath: string): Promise<ImageMetadata> {
     addIfPrefixed(toStringFromExifValue((rawExif as any)?.XPComment));
 
     // Build candidate set
-    const candidates: string[] = Array.from(new Set<string>([
+    const candidates = Array.from(new Set([
         ...com,
         ...exifStrings,
         ...xmpStrings,
@@ -714,19 +905,21 @@ async function readSdMetadata(filePath: string): Promise<ImageMetadata> {
         utf16JSON || '',
         utf8Params || '',
         utf16Params || ''
-    ].map(s => cleanText(s) || '').filter(Boolean)));
+    ].map(s => cleanText(s) || '').filter(Boolean))) as string[];
 
+    // Filter out full XMP packets so they don't become prompts
+    const filteredCandidates = candidates.filter(c => !looksLikeXmpPacket(c));
     const A1111_RE = /(Negative\s*prompt\s*:)|(Steps\s*:\s*\d+)|(Sampler\s*:\s*[A-Za-z0-9+ .-]+)/i;
 
-    for (const c of candidates) {
+    for (const c of filteredCandidates) {
         const j = tryParseJSON(c);
         if (j) {
-            // Prefer Comfy prompt-map if it looks like {"55": {...}, "110": {...}}
+            // Prefer Comfy prompt-map
             if (looksLikeComfyPromptMap(j)) {
                 const lifted = liftFromComfyPromptMap(j);
                 if (lifted) return { ...lifted, raw: { ...(lifted.raw || {}), exif: rawExif, jpegComments: com, json: j } };
             }
-            // Then Comfy graph if it has nodes (array or object)
+            // Or Comfy graph
             if (looksLikeComfyNodeMap(j)) {
                 const lifted = liftFromComfyGraph(j);
                 if (lifted) return { ...lifted, raw: { ...(lifted.raw || {}), exif: rawExif, jpegComments: com, json: j } };
@@ -835,7 +1028,28 @@ export async function getMetadataForFile(filePath: string): Promise<ImageMetadat
 }
 
 // ───────────────────────────────────────────────────────────────
-// PUBLIC — Writer (Atomic)  ✅ NEW
+/** Write sidecar as safe fallback for unsupported inline formats */
+async function writeSidecarForFile(filePath: string, meta: ImageMetadata) {
+    const dir = path.dirname(filePath);
+    const base = path.basename(filePath, path.extname(filePath));
+    const jsonPath = path.join(dir, `${base}.json`);
+
+    const out = {
+        prompt: meta.prompt || '',
+        negative: meta.negative || '',
+        steps: meta.steps ?? null,
+        cfg_scale: meta.cfg ?? null,
+        seed: meta.seed ?? null,
+        size: meta.size || null,
+        model: meta.model ? { name: meta.model } : null,
+        generator: meta.generator ?? null,
+    };
+
+    await fse.writeJSON(jsonPath, out, { spaces: 2 });
+}
+
+// ───────────────────────────────────────────────────────────────
+// PUBLIC — Writer (Atomic)
 // ───────────────────────────────────────────────────────────────
 export async function setMetadataForFile(
     filePath: string,
@@ -844,7 +1058,7 @@ export async function setMetadataForFile(
     const ext = path.extname(filePath).toLowerCase();
     const buf = await fs.promises.readFile(filePath);
 
-    // Merge incoming patch with current parsed metadata to keep fields consistent
+    // Merge incoming patch with current parsed metadata
     const current = await getMetadataForFile(filePath);
     const merged: ImageMetadata = {
         ...current,
@@ -868,38 +1082,16 @@ export async function setMetadataForFile(
             await fs.promises.writeFile(tmp, out);
             await fse.move(tmp, filePath, { overwrite: true });
         } else {
-            // Unsupported inline format (e.g., webp) — write sidecar as safe fallback
+            // Unsupported inline format — sidecar fallback
             await writeSidecarForFile(filePath, merged);
         }
     } finally {
-        // Best-effort cleanup if tmp remains
+        // Cleanup tmp if anything went wrong
         if (await fse.pathExists(tmp)) {
             try { await fse.remove(tmp); } catch {}
         }
     }
 
-    // Re-read to return normalized, embedded metadata
+    // Re-read and return normalized metadata
     return await getMetadataForFile(filePath);
-}
-
-// ───────────────────────────────────────────────────────────────
-// Internals — simple sidecar writer used for unsupported formats
-// ───────────────────────────────────────────────────────────────
-async function writeSidecarForFile(filePath: string, meta: ImageMetadata) {
-    const dir = path.dirname(filePath);
-    const base = path.basename(filePath, path.extname(filePath));
-    const jsonPath = path.join(dir, `${base}.json`);
-
-    const out = {
-        prompt: meta.prompt || '',
-        negative: meta.negative || '',
-        steps: meta.steps ?? null,
-        cfg_scale: meta.cfg ?? null,
-        seed: meta.seed ?? null,
-        size: meta.size || null,
-        model: meta.model ? { name: meta.model } : null,
-        generator: meta.generator ?? null,
-    };
-
-    await fse.writeJSON(jsonPath, out, { spaces: 2 });
 }

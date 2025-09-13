@@ -44,7 +44,6 @@ export async function parsePngTextParameters(filePath: string) {
     if (kv['json']) {
         try {
             const j = JSON.parse(kv['json']);
-            // You can route into your shared decoder here if desired
             return j;
         } catch { /* ignore malformed JSON */ }
     }
@@ -101,24 +100,12 @@ function makeITXt(keyword: string, text: string): Buffer {
     return packChunk('iTXt', data);
 }
 
-function composeA1111Parameters(meta: ImageMetadata): string {
-    const p = meta.prompt || '';
-    const n = meta.negative || '';
-    const bits: string[] = [];
-    if (meta.steps != null) bits.push(`Steps: ${meta.steps}`);
-    if (meta.sampler) bits.push(`Sampler: ${meta.sampler}`);
-    if (meta.cfg != null) bits.push(`CFG scale: ${meta.cfg}`);
-    if (meta.seed != null) bits.push(`Seed: ${meta.seed}`);
-    if (meta.size) bits.push(`Size: ${meta.size}`);
-    if (meta.model) bits.push(`Model: ${meta.model}`);
-    const tail = bits.join(', ');
-    return n ? `${p}\nNegative prompt: ${n}\n${tail}` : `${p}\n${tail}`;
-}
-
 /**
- * Write PNG metadata by inserting/updating iTXt chunks:
- *  - iTXt "parameters": A1111-compatible string
+ * Write PNG metadata using **structured JSON only**:
  *  - iTXt "sd-metadata": structured JSON for round-tripping
+ *
+ * We intentionally do **not** write "parameters" to avoid leaking
+ * Steps/Seed/etc into the positive prompt.
  */
 export async function writePngMetadata(
     inputPng: Buffer,
@@ -130,46 +117,32 @@ export async function writePngMetadata(
 
     // Parse existing chunks, rebuild and replace/add our metadata
     let offset = 8;
-    const chunks: { type: string; data: Buffer; raw: Buffer }[] = [];
+    const chunks: { type: string; data: Buffer }[] = [];
 
     while (offset + 8 <= inputPng.length) {
         const len = inputPng.readUInt32BE(offset); offset += 4;
         const type = inputPng.slice(offset, offset + 4).toString('ascii'); offset += 4;
         const data = inputPng.slice(offset, offset + len); offset += len;
-        const crc  = inputPng.slice(offset, offset + 4); offset += 4;
-        const raw  = Buffer.concat([
-            Buffer.alloc(4, 0), // placeholder, not used; we re-pack later
-            Buffer.from(type, 'ascii'),
-            data,
-            crc
-        ]);
-        chunks.push({ type, data, raw });
+        /* const crc  = */ offset += 4;
+        chunks.push({ type, data });
         if (type === 'IEND') break;
     }
 
-    // Remove existing "parameters" / "sd-metadata" iTXt to avoid duplicates
+    // Remove existing iTXt/tEXt/zTXt entries for keys we manage to avoid duplicates
     const filtered = chunks.filter(c => {
         if (c.type !== 'iTXt' && c.type !== 'tEXt' && c.type !== 'zTXt') return true;
-        // Peek key for iTXt/tEXt/zTXt to drop only our keys
         try {
-            if (c.type === 'iTXt') {
-                const data = c.data;
-                const nullIdx = data.indexOf(0);
-                const key = data.subarray(0, nullIdx).toString('utf8');
-                return key !== 'parameters' && key !== 'sd-metadata';
-            } else {
-                // tEXt / zTXt
-                const nullIdx = c.data.indexOf(0);
-                const key = c.data.subarray(0, nullIdx).toString('utf8');
-                return key !== 'parameters' && key !== 'sd-metadata';
-            }
+            const data = c.data;
+            const nullIdx = data.indexOf(0);
+            const key = data.subarray(0, nullIdx).toString('utf8').toLowerCase();
+            // Clean up legacy keys we used before
+            return key !== 'parameters' && key !== 'sd-metadata' && key !== 'negative' && key !== 'prompt';
         } catch {
             return true;
         }
     });
 
-    // Compose new metadata
-    const parameters = composeA1111Parameters(meta);
+    // Structured JSON payload for round-tripping
     const jsonBlob = JSON.stringify({
         prompt: meta.prompt ?? '',
         negative: meta.negative ?? '',
@@ -178,28 +151,20 @@ export async function writePngMetadata(
         seed: meta.seed ?? null,
         size: meta.size ?? null,
         model: meta.model ?? null,
-        generator: meta.generator ?? null
+        sampler: meta.sampler ?? null,
+        generator: meta.generator ?? null,
     });
 
-    const itxtParams = makeITXt('parameters', parameters);
-    const itxtJson   = makeITXt('sd-metadata', jsonBlob);
+    const itxtJson = makeITXt('sd-metadata', jsonBlob);
 
-    // Rebuild: [sig][IHDR..][...][iTXt params][iTXt json][IEND]
-    const outChunks: Buffer[] = [PNG_SIG];
-    let inserted = false;
-    for (let i = 0; i < filtered.length; i++) {
-        const c = filtered[i];
-        if (!inserted && c.type !== 'IHDR') {
-            // Insert immediately after IHDR and any PLTE/IDAT preamble—safe option: before IEND
-            // Simpler: when we hit IEND, inject our chunks just before it.
-        }
+    // Rebuild the PNG with our new metadata just before IEND
+    const out: Buffer[] = [PNG_SIG];
+    for (const c of filtered) {
         if (c.type === 'IEND') {
-            outChunks.push(itxtParams, itxtJson);
+            out.push(itxtJson);
         }
-        // Re-pack the chunk we kept
-        const data = c.data;
-        outChunks.push(packChunk(c.type, data));
+        out.push(packChunk(c.type, c.data));
     }
 
-    return Buffer.concat(outChunks);
+    return Buffer.concat(out);
 }

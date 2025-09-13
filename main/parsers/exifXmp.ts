@@ -9,18 +9,29 @@ const APP1 = 0xE1;
 
 const XMP_HEADER = Buffer.from('http://ns.adobe.com/xap/1.0/\x00', 'utf8');
 
+function escapeXml(s?: string | number | null): string {
+    if (s == null) return '';
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+/** Build XMP with dc:description (prompt only) + structured sdx:* tags */
 function buildXmpPacket(meta: ImageMetadata): Buffer {
-    // Basic XMP with Dublin Core + custom sdx namespace
-    const esc = (s?: string | number) => {
-        const v = s == null ? '' : String(s);
-        return v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    };
-    const description = esc(
-        meta.prompt
-            ? (meta.negative ? `${meta.prompt}\nNegative prompt: ${meta.negative}` : meta.prompt)
-            : ''
-    );
-    const size = meta.size || '';
+    const prompt = escapeXml(meta.prompt || '');
+    const negative = escapeXml(meta.negative || '');
+
+    const steps   = meta.steps != null ? `<sdx:steps>${escapeXml(meta.steps)}</sdx:steps>` : '';
+    const cfg     = meta.cfg   != null ? `<sdx:cfg>${escapeXml(meta.cfg)}</sdx:cfg>` : '';
+    const seed    = meta.seed  != null ? `<sdx:seed>${escapeXml(meta.seed)}</sdx:seed>` : '';
+    const model   = meta.model ? `<sdx:model>${escapeXml(meta.model)}</sdx:model>` : '';
+    const sampler = meta.sampler ? `<sdx:sampler>${escapeXml(meta.sampler)}</sdx:sampler>` : '';
+    const size    = meta.size ? `<sdx:size>${escapeXml(meta.size)}</sdx:size>` : '';
+    const generator = meta.generator ? `<sdx:generator>${escapeXml(meta.generator)}</sdx:generator>` : '';
+    const negTag  = negative ? `<sdx:negative>${negative}</sdx:negative>` : '';
+
+    // IMPORTANT: dc:description contains ONLY the prompt (no trailing K/V)
     const xml =
         `<x:xmpmeta xmlns:x="adobe:ns:meta/">
  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
@@ -29,18 +40,15 @@ function buildXmpPacket(meta: ImageMetadata): Buffer {
   <rdf:Description>
    <dc:description>
     <rdf:Alt>
-     <rdf:li xml:lang="x-default">${description}</rdf:li>
+     <rdf:li xml:lang="x-default">${prompt}</rdf:li>
     </rdf:Alt>
    </dc:description>
-   <sdx:generator>${esc(meta.generator)}</sdx:generator>
-   <sdx:model>${esc(meta.model)}</sdx:model>
-   <sdx:steps>${esc(meta.steps)}</sdx:steps>
-   <sdx:cfg>${esc(meta.cfg)}</sdx:cfg>
-   <sdx:seed>${esc(meta.seed)}</sdx:seed>
-   <sdx:size>${esc(size)}</sdx:size>
+   ${negTag}
+   ${steps}${cfg}${seed}${model}${sampler}${size}${generator}
   </rdf:Description>
  </rdf:RDF>
 </x:xmpmeta>`;
+
     const body = Buffer.from(xml, 'utf8');
     return Buffer.concat([XMP_HEADER, body]);
 }

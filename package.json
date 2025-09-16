@@ -1,6 +1,6 @@
 {
   "name": "image-nexus",
-  "version": "0.1.18",
+  "version": "0.1.20",
   "description": "Image Nexus — prompt & metadata viewer for AI output folders (Windows-first)",
   "main": ".vite/build/main/main.cjs",
   "type": "module",
